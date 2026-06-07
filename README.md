@@ -10,7 +10,7 @@
 | Sprint | Scope | Status | Last Updated |
 |--------|-------|--------|-------------|
 | Sprint 1 | Foundation - Webhook ingestion, DB schema, project scaffold | **Complete** | June 2026 |
-| Sprint 2 | Conversation state machine, AI intent classification | Not started | - |
+| Sprint 2 | Conversation state machine, AI intent classification | **Complete** | June 2026 |
 | Sprint 3 | Cart flow, Paystack payment integration | Not started | - |
 | Sprint 4 | Merchant onboarding dashboard | Not started | - |
 
@@ -68,6 +68,22 @@
 | Health check | Passing | `status: ok`, DB connected |
 | Telegram webhook | Built | Pending BotFather setup |
 | WhatsApp webhook | Built | Deferred to post-MVP |
+
+### Sprint 2 - Completed Items
+
+- [x] Anthropic client (Claude Haiku classifier + Claude Sonnet responder)
+- [x] Intent classifier - 12 intents, Nigerian pidgin-aware, local short-circuit for greetings
+- [x] Conversation state machine - button payload routing + phase-locked routing + intent routing
+- [x] Greeting handler - welcome message with main menu
+- [x] Browse handler - trigram fuzzy product search, inline keyboard results
+- [x] Product detail handler - AI-generated descriptions via Claude Sonnet
+- [x] Add to cart handler - cart management with quantity tracking
+- [x] View/clear cart handler - cart summary with totals
+- [x] Checkout handler - address collection, order summary, order creation
+- [x] Fallback handler - unknown intent redirect, AI support replies
+- [x] Product search (pg_trgm fuzzy search - pgvector deferred to Sprint 3)
+- [x] Webhook stub replaced with full state machine
+- [x] ConversationState + Cart persisted to Supabase on every message
 
 > **Channel decision:** Using Telegram for development and testing.
 > WhatsApp (Meta Cloud API) integration deferred to post-MVP.
