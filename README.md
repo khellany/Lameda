@@ -44,10 +44,16 @@
 - [x] Supabase project provisioned and connected
 - [x] All 10 tables verified in production database (June 2026)
 - [x] `.env.local` configured with Supabase credentials
-- [ ] Termii credentials added to `.env.local`
-- [ ] Termii webhook URL configured in Termii dashboard
-- [ ] End-to-end test: send WhatsApp message, verify DB record created
+- [ ] Telegram bot created via @BotFather
+- [ ] `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` added to `.env.local`
+- [ ] Migration 003 applied (adds `telegram_bot_token` column)
+- [ ] `node scripts/setup-telegram.mjs` run to register webhook
+- [ ] End-to-end test: send Telegram message, verify DB record created
 - [ ] Vercel project created and first deployment
+
+> **Channel decision:** Using Telegram for development and testing.
+> WhatsApp (Meta Cloud API) integration deferred to post-MVP.
+> All channel code is isolated in `src/lib/telegram/` and `src/lib/whatsapp/`.
 
 ---
 

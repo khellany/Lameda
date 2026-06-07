@@ -45,6 +45,7 @@ export interface Database {
           bot_personality: string | null
           ndpr_consent_at: string | null
           is_active: boolean
+          telegram_bot_token: string | null
         }
         Insert: {
           business_name: string
@@ -60,6 +61,7 @@ export interface Database {
           bot_personality?: string | null
           ndpr_consent_at?: string | null
           is_active?: boolean
+          telegram_bot_token?: string | null
         }
         Update: {
           business_name?: string
@@ -75,6 +77,7 @@ export interface Database {
           bot_personality?: string | null
           ndpr_consent_at?: string | null
           is_active?: boolean
+          telegram_bot_token?: string | null
         }
         Relationships: []
       }
