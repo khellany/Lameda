@@ -9,7 +9,7 @@
 
 | Sprint | Scope | Status | Last Updated |
 |--------|-------|--------|-------------|
-| Sprint 1 | Foundation - Webhook ingestion, DB schema, project scaffold | **In Progress** | June 2026 |
+| Sprint 1 | Foundation - Webhook ingestion, DB schema, project scaffold | **Complete** | June 2026 |
 | Sprint 2 | Conversation state machine, AI intent classification | Not started | - |
 | Sprint 3 | Cart flow, Paystack payment integration | Not started | - |
 | Sprint 4 | Merchant onboarding dashboard | Not started | - |
@@ -44,12 +44,16 @@
 - [x] Supabase project provisioned and connected
 - [x] All 10 tables verified in production database (June 2026)
 - [x] `.env.local` configured with Supabase credentials
-- [ ] Telegram bot created via @BotFather
-- [ ] `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` added to `.env.local`
-- [ ] Migration 003 applied (adds `telegram_bot_token` column)
-- [ ] `node scripts/setup-telegram.mjs` run to register webhook
+- [x] Telegram channel selected (replaces Termii/WhatsApp for dev)
+- [x] Telegram webhook handler built (`/api/webhook/telegram/[merchantId]`)
+- [x] Migration 003 applied (`telegram_bot_token` column on merchants)
+- [x] Vercel project created — `https://lameda.vercel.app`
+- [x] All environment variables configured on Vercel
+- [x] Production deployment live — health check `status: ok`, `db: connected` (513ms)
+- [x] GitHub repo synced — `https://github.com/khellany/Lameda`
+- [ ] Telegram bot created via @BotFather and token added to Vercel env
+- [ ] `node scripts/setup-telegram.mjs` run to register webhook URL
 - [ ] End-to-end test: send Telegram message, verify DB record created
-- [ ] Vercel project created and first deployment
 
 > **Channel decision:** Using Telegram for development and testing.
 > WhatsApp (Meta Cloud API) integration deferred to post-MVP.
