@@ -35,11 +35,12 @@ export async function GET() {
       latencyMs: Date.now() - start,
       timestamp: new Date().toISOString(),
     })
-  } catch {
+  } catch (err) {
     return NextResponse.json(
       {
         status: 'degraded',
         db: 'unreachable',
+        dbError: err instanceof Error ? err.message : String(err),
         latencyMs: Date.now() - start,
         timestamp: new Date().toISOString(),
       },

@@ -64,6 +64,16 @@ export function createAdminClient() {
         autoRefreshToken: false,
         persistSession: false,
       },
+      // Disable Realtime to prevent WebSocket initialization errors in
+      // Node.js 20 serverless environments (Vercel). Webhook handlers and
+      // background jobs use REST only — they do not need Realtime subscriptions.
+      // Node.js 22+ has native WebSocket; revisit when Vercel upgrades default runtime.
+      global: {
+        fetch: fetch.bind(globalThis),
+      },
+      realtime: {
+        params: { eventsPerSecond: -1 },
+      },
     }
   )
 }
