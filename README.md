@@ -49,11 +49,25 @@
 - [x] Migration 003 applied (`telegram_bot_token` column on merchants)
 - [x] Vercel project created — `https://lameda.vercel.app`
 - [x] All environment variables configured on Vercel
-- [x] Production deployment live — health check `status: ok`, `db: connected` (513ms)
+- [x] Production deployment live — `https://lameda.vercel.app`
+- [x] Health check confirmed: `status: ok`, `db: connected` (921ms)
+- [x] All 10 DB tables verified from production (June 2026)
 - [x] GitHub repo synced — `https://github.com/khellany/Lameda`
+- [x] Vercel root directory configured to `lameda/` subdirectory
 - [ ] Telegram bot created via @BotFather and token added to Vercel env
 - [ ] `node scripts/setup-telegram.mjs` run to register webhook URL
 - [ ] End-to-end test: send Telegram message, verify DB record created
+
+### Sprint 1 — Infrastructure Summary
+
+| Layer | Status | Detail |
+|-------|--------|--------|
+| GitHub | Live | `github.com/khellany/Lameda` |
+| Vercel | Live | `lameda.vercel.app` |
+| Supabase | Live | 10 tables, RLS enabled, pgvector active |
+| Health check | Passing | `status: ok`, DB connected |
+| Telegram webhook | Built | Pending BotFather setup |
+| WhatsApp webhook | Built | Deferred to post-MVP |
 
 > **Channel decision:** Using Telegram for development and testing.
 > WhatsApp (Meta Cloud API) integration deferred to post-MVP.
