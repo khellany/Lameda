@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
       event_type: payload.event,
       external_id: externalId ?? null,
       status: 'received',
-      payload: payload as unknown as Record<string, unknown>,
+      payload: payload as unknown as import('@/types/database').Json,
     })
     .select('id')
     .single()
@@ -160,15 +160,21 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 6: Load or create conversation
-    let { data: conversation } = await supabase
+    const { data: existingConv } = await supabase
       .from('conversations')
-      .select('id, status, state, cart, current_intent')
+      .select('id, status, state, cart, current_intent, message_count')
       .eq('merchant_id', merchant.id)
       .eq('customer_id', customer.id)
       .eq('status', 'active')
       .maybeSingle()
 
-    if (!conversation) {
+    let conversationId: string
+    let messageCount: number
+
+    if (existingConv) {
+      conversationId = existingConv.id
+      messageCount = existingConv.message_count ?? 0
+    } else {
       const { data: newConv, error: convError } = await supabase
         .from('conversations')
         .insert({
@@ -181,7 +187,7 @@ export async function POST(request: NextRequest) {
           last_message_at: new Date().toISOString(),
           message_count: 0,
         })
-        .select('id, status, state, cart, current_intent')
+        .select('id, message_count')
         .single()
 
       if (convError || !newConv) {
@@ -190,12 +196,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ received: true })
       }
 
-      conversation = newConv
+      conversationId = newConv.id
+      messageCount = 0
     }
 
     // Persist the inbound message to message history
     await supabase.from('messages').insert({
-      conversation_id: conversation.id,
+      conversation_id: conversationId,
       merchant_id: merchant.id,
       customer_id: customer.id,
       direction: 'inbound',
@@ -213,9 +220,9 @@ export async function POST(request: NextRequest) {
       .from('conversations')
       .update({
         last_message_at: new Date().toISOString(),
-        message_count: (conversation.message_count ?? 0) + 1,
+        message_count: messageCount + 1,
       })
-      .eq('id', conversation.id)
+      .eq('id', conversationId)
 
     // Step 7: Route to state machine
     // TODO (Sprint 2): Replace this stub with the full state machine.
@@ -226,7 +233,7 @@ export async function POST(request: NextRequest) {
 
     // Step 8: Persist outbound message (the response we're about to send)
     await supabase.from('messages').insert({
-      conversation_id: conversation.id,
+      conversation_id: conversationId,
       merchant_id: merchant.id,
       customer_id: customer.id,
       direction: 'outbound',
@@ -245,7 +252,7 @@ export async function POST(request: NextRequest) {
     }
 
     logger.info(
-      { conversationId: conversation.id, merchantId: merchant.id },
+      { conversationId, merchantId: merchant.id },
       'Webhook processed successfully'
     )
 
