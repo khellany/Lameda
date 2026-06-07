@@ -1,0 +1,7 @@
+# Vercel ignore file (repo root)
+# Excludes documentation and non-app folders from deployment uploads.
+# The actual app root is configured as 'lameda/' in Vercel project settings.
+v1/
+v2/
+v3/
+artifacts/
