@@ -56,8 +56,15 @@ export async function createServerSupabaseClient() {
  *   at 500+ merchants. See ADR-001.
  */
 export function createAdminClient() {
+  // Prefer SUPABASE_URL (runtime server-only) over NEXT_PUBLIC_SUPABASE_URL
+  // (build-time baked). Both point to the same Supabase project URL.
+  // NEXT_PUBLIC_ vars are inlined at build time and may be undefined at
+  // runtime in some Vercel configurations. The plain var is always runtime.
+  const supabaseUrl =
+    process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+
   return createSupabaseClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    supabaseUrl,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     {
       auth: {
