@@ -14,7 +14,20 @@ export async function GET() {
 
   try {
     const supabase = createAdminClient()
-    await supabase.from('merchants').select('id').limit(1)
+    const { error } = await supabase.from('merchants').select('id').limit(1)
+
+    if (error) {
+      return NextResponse.json(
+        {
+          status: 'degraded',
+          db: 'error',
+          dbError: error.message,
+          latencyMs: Date.now() - start,
+          timestamp: new Date().toISOString(),
+        },
+        { status: 503 }
+      )
+    }
 
     return NextResponse.json({
       status: 'ok',

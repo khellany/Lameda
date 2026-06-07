@@ -31,7 +31,7 @@
 - [x] Conversation create/load with JSONB state
 - [x] Full message history persistence (inbound + outbound)
 - [x] Health check endpoint (`GET /api/health`)
-- [x] PostgreSQL schema with all 9 core tables
+- [x] PostgreSQL schema with all 10 core tables
 - [x] Row Level Security policies (multi-tenant isolation)
 - [x] pgvector extension + product_embeddings table
 - [x] NDPR erasure procedure (`anonymize_customer()`)
@@ -41,9 +41,11 @@
 
 ### Sprint 1 - In Progress / Pending
 
-- [ ] Supabase project provisioned (pending credentials from founder)
+- [x] Supabase project provisioned and connected
+- [x] All 10 tables verified in production database (June 2026)
+- [x] `.env.local` configured with Supabase credentials
+- [ ] Termii credentials added to `.env.local`
 - [ ] Termii webhook URL configured in Termii dashboard
-- [ ] `.env.local` filled in and verified
 - [ ] End-to-end test: send WhatsApp message, verify DB record created
 - [ ] Vercel project created and first deployment
 
