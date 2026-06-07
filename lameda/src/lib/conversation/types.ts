@@ -46,6 +46,8 @@ export type ConversationPhase =
   | 'greeting'
   | 'browsing'
   | 'product_detail'
+  | 'selecting_size'     // Waiting for customer to choose a size
+  | 'selecting_color'    // Waiting for customer to choose a color
   | 'cart_review'
   | 'collecting_address'
   | 'confirming_order'
@@ -56,8 +58,12 @@ export type ConversationPhase =
 export interface ConversationState {
   phase: ConversationPhase
   channel: 'telegram' | 'whatsapp'
-  /** Product ID currently being viewed */
+  /** Product ID currently being viewed or being configured for cart */
   activeProductId?: string
+  /** Size selected during selecting_size phase */
+  pendingSize?: string
+  /** Color selected during selecting_color phase */
+  pendingColor?: string
   /** Last search query for context */
   lastQuery?: string
   /** Delivery address being collected */
