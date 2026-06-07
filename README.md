@@ -1,7 +1,51 @@
 # Lameda - Product and Strategy Repository
 **Project:** Lameda Conversational Commerce Platform
 **Founder:** Dayo Oladayo Kelani
-**Status:** Pre-Seed | May 2026
+**Status:** Pre-Seed | Active Development
+
+---
+
+## Development Status
+
+| Sprint | Scope | Status | Last Updated |
+|--------|-------|--------|-------------|
+| Sprint 1 | Foundation - Webhook ingestion, DB schema, project scaffold | **In Progress** | June 2026 |
+| Sprint 2 | Conversation state machine, AI intent classification | Not started | - |
+| Sprint 3 | Cart flow, Paystack payment integration | Not started | - |
+| Sprint 4 | Merchant onboarding dashboard | Not started | - |
+
+### Sprint 1 - Completed Items
+
+- [x] Git repository initialized
+- [x] Product documentation committed (v1, v2, v3, artifacts)
+- [x] Next.js 14 (App Router) scaffold created in `lameda/`
+- [x] TypeScript, Tailwind, ESLint configured
+- [x] Supabase client (browser + server + admin) set up
+- [x] Structured logger (Pino) configured with PII redaction
+- [x] WhatsApp webhook endpoint (`POST /api/webhook/whatsapp`)
+- [x] HMAC-SHA512 signature verification (Termii + Paystack)
+- [x] Webhook idempotency (deduplication via `webhook_events` table)
+- [x] Message normalization (BSP-agnostic `NormalizedMessage` type)
+- [x] Merchant lookup by WhatsApp destination number
+- [x] Customer upsert on first contact
+- [x] Conversation create/load with JSONB state
+- [x] Full message history persistence (inbound + outbound)
+- [x] Health check endpoint (`GET /api/health`)
+- [x] PostgreSQL schema with all 9 core tables
+- [x] Row Level Security policies (multi-tenant isolation)
+- [x] pgvector extension + product_embeddings table
+- [x] NDPR erasure procedure (`anonymize_customer()`)
+- [x] Technical debt register (`lameda/docs/TECHNICAL_DEBT.md`)
+- [x] Contributing and handover guide (`lameda/docs/CONTRIBUTING.md`)
+- [x] Environment variables template (`.env.local.example`)
+
+### Sprint 1 - In Progress / Pending
+
+- [ ] Supabase project provisioned (pending credentials from founder)
+- [ ] Termii webhook URL configured in Termii dashboard
+- [ ] `.env.local` filled in and verified
+- [ ] End-to-end test: send WhatsApp message, verify DB record created
+- [ ] Vercel project created and first deployment
 
 ---
 
