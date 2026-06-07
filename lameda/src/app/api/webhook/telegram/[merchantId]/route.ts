@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyTelegramWebhook } from '@/lib/telegram/verify'
 import { normalizeTelegramUpdate, type TelegramUpdate } from '@/lib/telegram/types'
-import { sendTextMessage } from '@/lib/telegram/client'
 import { createAdminClient } from '@/lib/supabase/server'
 import { logger } from '@/lib/utils/logger'
+import { runStateMachine } from '@/lib/conversation/stateMachine'
+import type { ConversationState, Cart } from '@/lib/conversation/types'
 
 /**
  * POST /api/webhook/telegram/[merchantId]
@@ -145,10 +146,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ ok: true })
     }
 
-    // Step 6: Load or create conversation
+    // Step 6: Load or create conversation with full state
     const { data: existingConv } = await supabase
       .from('conversations')
-      .select('id, message_count')
+      .select('id, message_count, state, cart')
       .eq('merchant_id', merchant.id)
       .eq('customer_id', customer.id)
       .eq('status', 'active')
@@ -156,10 +157,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     let conversationId: string
     let messageCount: number
+    let convState: ConversationState
+    let convCart: Cart
 
     if (existingConv) {
       conversationId = existingConv.id
       messageCount = existingConv.message_count ?? 0
+      convState = (existingConv.state as unknown as ConversationState) ?? { phase: 'greeting', channel: 'telegram' }
+      convCart = (existingConv.cart as unknown as Cart) ?? { items: [], totalKobo: 0 }
     } else {
       const { data: newConv, error: convError } = await supabase
         .from('conversations')
@@ -168,7 +173,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           customer_id: customer.id,
           status: 'active',
           state: { phase: 'greeting', channel: 'telegram' },
-          cart: { items: [], total_kobo: 0 },
+          cart: { items: [], totalKobo: 0 },
           last_message_at: new Date().toISOString(),
           message_count: 0,
         })
@@ -183,6 +188,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
       conversationId = newConv.id
       messageCount = 0
+      convState = { phase: 'greeting', channel: 'telegram' }
+      convCart = { items: [], totalKobo: 0 }
     }
 
     // Persist inbound message
@@ -197,17 +204,29 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       metadata: { buttonPayload: message.buttonPayload, mediaUrl: message.mediaUrl },
     })
 
+    // Step 7: Run state machine — replaces Sprint 1 stub
+    const result = await runStateMachine(
+      message.text ?? '',
+      message.buttonPayload,
+      convState,
+      convCart,
+      merchant.id,
+      customer.id,
+      conversationId,
+      merchant.telegram_bot_token,
+      message.from,
+    )
+
+    // Step 8: Persist updated state and cart
     await supabase
       .from('conversations')
-      .update({ last_message_at: new Date().toISOString(), message_count: messageCount + 1 })
+      .update({
+        state: result.newState as unknown as import('@/types/database').Json,
+        cart: result.newCart as unknown as import('@/types/database').Json,
+        last_message_at: new Date().toISOString(),
+        message_count: messageCount + 1,
+      })
       .eq('id', conversationId)
-
-    // Step 7: State machine stub (Sprint 2 replaces this)
-    // TODO: implement src/lib/conversation/stateMachine.ts
-    const replyText = `👋 Hi! I got your message: *${message.text ?? '[media]'}*\n\nLameda bot is being set up. Full experience coming soon!`
-
-    // Step 8: Send reply via Telegram
-    await sendTextMessage(merchant.telegram_bot_token, message.from, replyText)
 
     // Persist outbound message
     await supabase.from('messages').insert({
@@ -215,7 +234,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       merchant_id: merchant.id,
       customer_id: customer.id,
       direction: 'outbound',
-      content: replyText,
+      content: result.replySent,
       message_type: 'text',
       external_message_id: null,
       metadata: {},
