@@ -53,6 +53,7 @@ export interface Database {
           merchant_config: Json
           api_key: string | null
           email_hash: string | null
+          admin_telegram_chat_id: string | null
         }
         Insert: {
           business_name: string
@@ -73,6 +74,7 @@ export interface Database {
           merchant_config?: Json
           api_key?: string | null
           email_hash?: string | null
+          admin_telegram_chat_id?: string | null
         }
         Update: {
           business_name?: string
@@ -93,6 +95,7 @@ export interface Database {
           email_hash?: string | null
           is_active?: boolean
           telegram_bot_token?: string | null
+          admin_telegram_chat_id?: string | null
         }
         Relationships: []
       }

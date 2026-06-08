@@ -9,6 +9,15 @@ import { checkCustomerRateLimit } from '@/lib/utils/rateLimit'
 import { getMerchantConfig, type BusinessType } from '@/lib/merchant/config'
 import { safeDecrypt } from '@/lib/crypto/pii'
 import type { ConversationState, Cart } from '@/lib/conversation/types'
+import {
+  handleRegisterAdmin,
+  handleAdminHelp,
+  handleListProducts,
+  handleOrdersSummary,
+  startAddProduct,
+  startUpdateStock,
+  continueAdminFlow,
+} from '@/lib/conversation/handlers/admin'
 
 /**
  * POST /api/webhook/telegram/[merchantId]
@@ -108,7 +117,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Step 3: Load merchant (includes business_type + merchant_config for Sprint 4)
     const { data: merchant } = await supabase
       .from('merchants')
-      .select('id, bot_name, telegram_bot_token, subscription_tier, is_active, business_type, merchant_config')
+      .select('id, bot_name, telegram_bot_token, subscription_tier, is_active, business_type, merchant_config, admin_telegram_chat_id')
       .eq('id', merchantId)
       .eq('is_active', true)
       .maybeSingle()
@@ -242,24 +251,68 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       metadata: { buttonPayload: message.buttonPayload, mediaUrl: message.mediaUrl },
     })
 
-    // Step 7: Run state machine — replaces Sprint 1 stub
-    // Extract callback_query_id so the state machine can answer it (required by Telegram API)
+    // Step 7: Admin command routing (pre-empts customer state machine)
+    //
+    // /register is available to anyone — it's the one-time admin setup command.
+    // All other slash commands and admin flow continuations require the sender
+    // to be the registered admin (admin_telegram_chat_id === message.from).
     const callbackQueryId = update.callback_query?.id ?? null
+    const incomingText = message.text ?? ''
+    const isSlashCommand = incomingText.startsWith('/')
+    const isAdminSender = merchant.admin_telegram_chat_id === message.from
 
-    const result = await runStateMachine(
-      message.text ?? '',
-      message.buttonPayload,
-      message.type === 'media' ? message.mediaUrl : null, // only pass file_id for photo/doc messages
-      convState,
-      convCart,
-      merchant.id,
-      customer.id,
-      conversationId,
-      botToken,
-      message.from,
-      callbackQueryId,
-      merchantConfig,
-    )
+    let result = null as import('@/lib/conversation/types').HandlerResult | null
+
+    if (isSlashCommand && incomingText.toLowerCase().startsWith('/register')) {
+      // /register is the bootstrap — anyone in the bot can attempt it
+      result = await handleRegisterAdmin(incomingText, message.from, botToken, merchant.id, convState, convCart)
+    } else if (isAdminSender) {
+      if (convState.phase === 'admin_flow' && convState.adminFlow && !isSlashCommand) {
+        // Admin is mid-flow — continue the multi-step command
+        result = await continueAdminFlow(incomingText, message.from, botToken, merchant.id, convState, convCart)
+      } else if (isSlashCommand) {
+        // Route slash command to the correct admin handler
+        const [cmd, ...args] = incomingText.trim().split(/\s+/)
+        switch (cmd.toLowerCase()) {
+          case '/admin':
+          case '/help':
+            result = await handleAdminHelp(botToken, message.from, convState, convCart)
+            break
+          case '/listproducts':
+            result = await handleListProducts(args, botToken, message.from, merchant.id, convState, convCart)
+            break
+          case '/addproduct':
+            result = await startAddProduct(botToken, message.from, convState, convCart)
+            break
+          case '/updatestock':
+            result = await startUpdateStock(botToken, message.from, convState, convCart)
+            break
+          case '/orders':
+            result = await handleOrdersSummary(args, botToken, message.from, merchant.id, convState, convCart)
+            break
+          default:
+            result = await handleAdminHelp(botToken, message.from, convState, convCart)
+        }
+      }
+    }
+
+    // Fall through to customer state machine if not handled by admin routing
+    if (!result) {
+      result = await runStateMachine(
+        incomingText,
+        message.buttonPayload,
+        message.type === 'media' ? message.mediaUrl : null,
+        convState,
+        convCart,
+        merchant.id,
+        customer.id,
+        conversationId,
+        botToken,
+        message.from,
+        callbackQueryId,
+        merchantConfig,
+      )
+    }
 
     // Step 8: Persist updated state and cart
     await supabase

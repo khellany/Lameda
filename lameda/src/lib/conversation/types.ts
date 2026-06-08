@@ -68,6 +68,23 @@ export type ConversationPhase =
   | 'completed'
   | 'support'
   | 'complaint'             // Structured complaint/return flow
+  | 'admin_flow'            // Merchant is in a multi-step admin command flow
+
+// Admin flow types — stored in ConversationState.adminFlow when phase === 'admin_flow'
+export type AdminFlowStep =
+  | 'awaiting_product_name'
+  | 'awaiting_product_price'
+  | 'awaiting_product_category'
+  | 'awaiting_product_description'
+  | 'awaiting_product_stock'
+  | 'awaiting_stock_product'    // /updatestock step 1: which product?
+  | 'awaiting_stock_quantity'   // /updatestock step 2: new quantity?
+
+export interface AdminFlowState {
+  step: AdminFlowStep
+  /** Accumulated form data across multi-step flows */
+  data: Record<string, string | number>
+}
 
 export interface ConversationState {
   phase: ConversationPhase
@@ -92,6 +109,8 @@ export interface ConversationState {
   activeOrderId?: string
   /** Detected language: 'en' | 'pcm' (Nigerian Pidgin) */
   language?: string
+  /** Set when phase === 'admin_flow' — tracks multi-step admin command progress */
+  adminFlow?: AdminFlowState
 }
 
 // ----------------------------------------------------------------
