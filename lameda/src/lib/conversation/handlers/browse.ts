@@ -11,8 +11,22 @@ import type { ConversationContext, HandlerResult } from '../types'
  * message (a button press) can look up the exact product without
  * another search.
  */
+// Button payload IDs that reach handleBrowse via routeButtonPayload.
+// When these are the rawMessage, the user clicked a button — not a search.
+const BUTTON_RAW = /^(browse_all|view_cart|checkout|support|product_|add_to_cart_|size_|color_|confirm_order|cancel_order)/
+
 export async function handleBrowse(ctx: ConversationContext): Promise<HandlerResult> {
-  const query = ctx.intent.entities.productQuery ?? ''
+  const isButtonAction = BUTTON_RAW.test(ctx.rawMessage)
+
+  // productQuery is populated when Claude extracts a specific product term.
+  // For general phrases ("show me dresses", "something for a wedding"),
+  // productQuery is null — fall back to the full raw message so semantic
+  // search can match by meaning rather than exact keyword.
+  const query =
+    ctx.intent.entities.productQuery ||
+    (!isButtonAction ? ctx.rawMessage.trim() : '') ||
+    ''
+
   const filters = {
     size: ctx.intent.entities.size,
     color: ctx.intent.entities.color,
