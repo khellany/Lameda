@@ -111,6 +111,7 @@ export async function POST(request: NextRequest) {
       subscription_status: 'trial',
       trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       api_key: apiKey,
+      // @ts-expect-error — auth_user_id added in migration 013; regenerate types after running it
       auth_user_id: authUserId,
       is_active: true,
     })
