@@ -51,12 +51,13 @@ export interface Database {
           default_delivery_fee_kobo: number
           business_type: BusinessType
           merchant_config: Json
+          api_key: string | null
         }
         Insert: {
           business_name: string
           owner_name: string
           email: string
-          whatsapp_number: string
+          whatsapp_number?: string | null
           subscription_tier?: SubscriptionTier
           subscription_status?: SubscriptionStatus
           trial_ends_at?: string | null
@@ -69,12 +70,13 @@ export interface Database {
           telegram_bot_token?: string | null
           business_type?: BusinessType
           merchant_config?: Json
+          api_key?: string | null
         }
         Update: {
           business_name?: string
           owner_name?: string
           email?: string
-          whatsapp_number?: string
+          whatsapp_number?: string | null
           subscription_tier?: SubscriptionTier
           subscription_status?: SubscriptionStatus
           trial_ends_at?: string | null
@@ -85,6 +87,7 @@ export interface Database {
           ndpr_consent_at?: string | null
           business_type?: BusinessType
           merchant_config?: Json
+          api_key?: string | null
           is_active?: boolean
           telegram_bot_token?: string | null
         }

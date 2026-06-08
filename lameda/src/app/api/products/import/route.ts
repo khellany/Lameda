@@ -14,14 +14,17 @@
  * Response:
  *   { imported: number, skipped: number, errors: Array<{ row, reason }> }
  *
- * Auth: X-Merchant-Id + X-Api-Key (= MERCHANT_API_KEY env var)
+ * Auth (two modes — both supported):
+ *   Per-merchant: X-Merchant-Api-Key: lmd_xxxxx  (generated during onboarding)
+ *   Legacy:       X-Merchant-Id + X-Api-Key (= MERCHANT_API_KEY env var)
  *
  * After a successful import the caller should hit
  *   POST /api/products/embed-all
  * to generate embeddings for all newly created products.
  *
- * TECHNICAL DEBT:
- * Replace header-based auth with merchant JWT once E1 auth stories ship.
+ * TECHNICAL DEBT (TD-001):
+ * Legacy shared MERCHANT_API_KEY should be retired once all merchants
+ * have migrated to per-merchant api_key (Sprint 5 onboarding story).
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -36,11 +39,38 @@ const MAX_ROWS = 100 // Starter plan limit; enforce per plan in future
 // ----------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
-  // Auth
-  const merchantId = request.headers.get('x-merchant-id')
-  const apiKey = request.headers.get('x-api-key')
+  const supabase = createAdminClient()
+  let merchantId: string | null = null
 
-  if (!merchantId || apiKey !== process.env.MERCHANT_API_KEY) {
+  // Auth: per-merchant API key (preferred — generated during onboarding)
+  const merchantApiKey = request.headers.get('x-merchant-api-key')
+  if (merchantApiKey) {
+    const { data: merchant } = await supabase
+      .from('merchants')
+      .select('id')
+      .eq('api_key', merchantApiKey)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (!merchant) {
+      return NextResponse.json({ error: 'Invalid API key' }, { status: 401 })
+    }
+    merchantId = merchant.id
+  } else {
+    // Legacy: shared env-var key + explicit merchant ID
+    const legacyMerchantId = request.headers.get('x-merchant-id')
+    const legacyApiKey = request.headers.get('x-api-key')
+
+    if (!legacyMerchantId || legacyApiKey !== process.env.MERCHANT_API_KEY) {
+      return NextResponse.json(
+        { error: 'Unauthorized — use X-Merchant-Api-Key header (get this from /onboard)' },
+        { status: 401 },
+      )
+    }
+    merchantId = legacyMerchantId
+  }
+
+  if (!merchantId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -59,8 +89,6 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     )
   }
-
-  const supabase = createAdminClient()
 
   const imported: string[] = []  // product IDs successfully created
   const skipped: number[] = []
