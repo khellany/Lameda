@@ -1,6 +1,6 @@
 import { classifyIntent } from '@/lib/ai/classify'
 import { handleGreeting } from './handlers/greeting'
-import { handleBrowse } from './handlers/browse'
+import { handleBrowse, handleBrowseCategory } from './handlers/browse'
 import {
   handleProductDetail,
   handleAddToCart,
@@ -193,6 +193,18 @@ function routeButtonPayload(payload: string, ctx: ConversationContext): Promise<
   }
 
   if (payload === 'search_by_photo') return handleSearchByPhoto(ctx)
+
+  // Category drill-down: category_{categoryName}
+  if (payload.startsWith('category_')) {
+    const category = payload.slice('category_'.length)
+    return handleBrowseCategory(ctx, category)
+  }
+
+  // "Search Everything" — bypasses category menu, shows all products
+  if (payload === 'browse_all_products') {
+    ctx.intent = { intent: 'browse_products', confidence: 'high', entities: {}, raw: payload }
+    return handleBrowse(ctx)
+  }
 
   if (payload === 'browse_all') {
     ctx.intent = { intent: 'browse_products', confidence: 'high', entities: {}, raw: payload }

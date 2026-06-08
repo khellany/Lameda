@@ -28,13 +28,34 @@ const MAX_RESULTS = 5
 const SIMILARITY_THRESHOLD = 0.5 // >50% similar — permissive for broad fashion terms
 
 // ----------------------------------------------------------------
+// Categories
+// ----------------------------------------------------------------
+
+/** Returns distinct non-null categories for a merchant, sorted alphabetically. */
+export async function getProductCategories(merchantId: string): Promise<string[]> {
+  const supabase = createAdminClient()
+
+  const { data, error } = await supabase
+    .from('products')
+    .select('category')
+    .eq('merchant_id', merchantId)
+    .eq('is_active', true)
+    .not('category', 'is', null)
+
+  if (error || !data) return []
+
+  const unique = [...new Set(data.map(r => r.category as string))]
+  return unique.sort()
+}
+
+// ----------------------------------------------------------------
 // Public API
 // ----------------------------------------------------------------
 
 export async function searchProducts(
   merchantId: string,
   query: string,
-  filters?: { size?: string; color?: string },
+  filters?: { size?: string; color?: string; category?: string },
 ): Promise<ProductSummary[]> {
   // Empty query → show all products (browse mode, skip vector search)
   if (!query.trim()) {
@@ -117,7 +138,7 @@ async function vectorSearch(
 async function trigramSearch(
   merchantId: string,
   query: string,
-  filters?: { size?: string; color?: string },
+  filters?: { size?: string; color?: string; category?: string },
 ): Promise<ProductSummary[]> {
   const supabase = createAdminClient()
 
@@ -133,6 +154,7 @@ async function trigramSearch(
     )
   }
 
+  if (filters?.category) dbQuery = dbQuery.eq('category', filters.category)
   if (filters?.size) dbQuery = dbQuery.contains('sizes', [filters.size])
   if (filters?.color) dbQuery = dbQuery.contains('colors', [filters.color])
 
@@ -152,7 +174,7 @@ async function trigramSearch(
 
 async function fetchAllProducts(
   merchantId: string,
-  filters?: { size?: string; color?: string },
+  filters?: { size?: string; color?: string; category?: string },
 ): Promise<ProductSummary[]> {
   const supabase = createAdminClient()
 
@@ -162,6 +184,7 @@ async function fetchAllProducts(
     .eq('merchant_id', merchantId)
     .eq('is_active', true)
 
+  if (filters?.category) dbQuery = dbQuery.eq('category', filters.category)
   if (filters?.size) dbQuery = dbQuery.contains('sizes', [filters.size])
   if (filters?.color) dbQuery = dbQuery.contains('colors', [filters.color])
 
@@ -181,13 +204,14 @@ async function fetchAllProducts(
 
 function applyFilters(
   products: ProductSummary[],
-  filters?: { size?: string; color?: string },
+  filters?: { size?: string; color?: string; category?: string },
 ): ProductSummary[] {
-  if (!filters?.size && !filters?.color) return products
+  if (!filters?.size && !filters?.color && !filters?.category) return products
   return products.filter(p => {
+    const categoryOk = !filters.category || p.category === filters.category
     const sizeOk = !filters.size || p.sizes.includes(filters.size)
     const colorOk = !filters.color || p.colors.includes(filters.color)
-    return sizeOk && colorOk
+    return categoryOk && sizeOk && colorOk
   })
 }
 
