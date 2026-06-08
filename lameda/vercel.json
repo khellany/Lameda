@@ -6,11 +6,11 @@
   "crons": [
     {
       "path": "/api/cron/cart-recovery",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 8 * * *"
     },
     {
       "path": "/api/cron/payment-expiry",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 8 * * *"
     }
   ]
 }
