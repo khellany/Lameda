@@ -11,6 +11,7 @@
 
 export type Intent =
   | 'greeting'         // Hello, hi, good morning
+  | 'social_phrase'    // Thank you, okay, great, got it — acknowledgements
   | 'browse_products'  // Show me dresses, what do you have, catalog
   | 'product_inquiry'  // Do you have size 12? What colors? How much?
   | 'add_to_cart'      // I want this one, add to cart, buy this
@@ -55,6 +56,7 @@ export type ConversationPhase =
   | 'selecting_color'       // Waiting for customer to choose a color
   | 'searching_by_image'    // Waiting for customer to send a photo
   | 'selecting_delivery'    // Waiting for delivery vs pickup choice
+  | 'selecting_logistics'   // Outside Lagos — waiting for GIG vs Park Waybill
   | 'cart_review'
   | 'collecting_address'
   | 'confirming_order'
@@ -80,6 +82,8 @@ export interface ConversationState {
   lastQuery?: string
   /** Delivery address being collected */
   pendingAddress?: string
+  /** Logistics method for outside-Lagos orders: 'gig' | 'park_waybill' */
+  pendingLogisticsType?: 'gig' | 'park_waybill'
   /** Order reference if order was created */
   activeOrderId?: string
   /** Detected language: 'en' | 'pcm' (Nigerian Pidgin) */

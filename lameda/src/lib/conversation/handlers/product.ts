@@ -167,12 +167,14 @@ async function showQuantitySelection(
   productId: string,
   productName: string,
 ): Promise<HandlerResult> {
-  const msg = `🔢 How many *${productName}* would you like?`
+  const msg = `🔢 How many *${productName}* would you like?\n_Tap a number or type any quantity_`
 
   await sendButtonsMessage(ctx.botToken, ctx.chatId, msg, [
     { id: `qty_${productId}_1`, title: '1' },
     { id: `qty_${productId}_2`, title: '2' },
     { id: `qty_${productId}_3`, title: '3' },
+    { id: `qty_${productId}_4`, title: '4' },
+    { id: `qty_${productId}_5`, title: '5' },
   ])
 
   return {

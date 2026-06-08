@@ -17,22 +17,35 @@ const CATEGORY_EMOJI: Record<string, string> = {
 // When rawMessage matches these, the user clicked a button — not a search.
 const BUTTON_RAW = /^(browse_all|view_cart|checkout|support|product_|add_to_cart_|size_|color_|confirm_order|cancel_order|category_)/
 
+// Generic catalog-request phrases — these mean "show me everything", not a product name.
+// When the productQuery matches one of these, treat it as no-query and show the category menu.
+const CATALOG_PHRASES = new Set([
+  'wetin you get', 'what do you have', 'what you have', 'show me', 'show me what you have',
+  'what do you sell', 'what you sell', 'wetin you dey sell', 'your products', 'your catalog',
+  'show everything', 'see products', 'list products', 'show products', 'catalog',
+  'abeg show me', 'what products', 'what items', 'wetin dey', 'wetin u get',
+])
+
 /**
  * Browse entry point — called for both "Browse Products" button and typed searches.
  *
  * Two modes:
- * 1. Button click (browse_all) with no query → show category menu
- * 2. Text message → semantic search, show matching products directly
+ * 1. Button click (browse_all) or catalog phrase with no real query → show category menu
+ * 2. Text message with a real product query → semantic search, show matching products
  */
 export async function handleBrowse(ctx: ConversationContext): Promise<HandlerResult> {
   const isButtonAction = BUTTON_RAW.test(ctx.rawMessage)
 
-  const query =
+  const rawQuery =
     ctx.intent.entities.productQuery ||
     (!isButtonAction ? ctx.rawMessage.trim() : '') ||
     ''
 
-  // No query = user clicked Browse Products → show category selector
+  // Treat generic catalog phrases as no-query → show category selector
+  const isCatalogPhrase = CATALOG_PHRASES.has(rawQuery.toLowerCase().trim())
+  const query = isCatalogPhrase ? '' : rawQuery
+
+  // No query = user clicked Browse Products or used a generic phrase → show category selector
   if (!query) {
     return showCategoryMenu(ctx)
   }

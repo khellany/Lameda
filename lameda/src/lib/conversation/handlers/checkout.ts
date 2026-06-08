@@ -38,18 +38,16 @@ export async function handleCheckoutStart(ctx: ConversationContext): Promise<Han
 
   const hasPickup = !!merchant?.pickup_address
 
+  // If only delivery is available, skip the choice step and ask for address directly
+  if (!hasPickup) {
+    return handleDeliveryChosen(ctx)
+  }
+
   const msg = `📦 How would you like to receive your order?`
-
-  const buttons = hasPickup
-    ? [
-        { id: 'delivery_choice_delivery', title: '🏍 Delivery' },
-        { id: 'delivery_choice_pickup', title: '🏪 Pickup' },
-      ]
-    : [
-        { id: 'delivery_choice_delivery', title: '🏍 Delivery' },
-      ]
-
-  await sendButtonsMessage(ctx.botToken, ctx.chatId, msg, buttons)
+  await sendButtonsMessage(ctx.botToken, ctx.chatId, msg, [
+    { id: 'delivery_choice_delivery', title: '🏍 Delivery' },
+    { id: 'delivery_choice_pickup', title: '🏪 Pickup' },
+  ])
 
   return {
     newState: { ...ctx.state, phase: 'selecting_delivery' },
@@ -65,7 +63,7 @@ export async function handleCheckoutStart(ctx: ConversationContext): Promise<Han
 export async function handleDeliveryChosen(ctx: ConversationContext): Promise<HandlerResult> {
   const msg =
     `📍 Please send your *delivery address*.\n\n` +
-    `Include: house number, street, area, city, and state.\n` +
+    `Format: house number, street, area, city, and state.\n` +
     `_Example: 12 Adeniyi Jones, Ikeja, Lagos_`
 
   await sendTextMessage(ctx.botToken, ctx.chatId, msg)
@@ -138,9 +136,34 @@ export async function handleAddressReceived(ctx: ConversationContext): Promise<H
     return { newState: ctx.state, newCart: ctx.cart, replySent: msg }
   }
 
-  // Match delivery zone from address keywords
-  const deliveryFeeKobo = await resolveDeliveryFee(ctx.merchantId, address)
+  // Detect delivery state — prioritise state over city
+  const deliveryState = extractStateFromAddress(address)
+  const isLagos = !deliveryState || deliveryState.toLowerCase() === 'lagos'
 
+  // Outside Lagos — ask customer to choose a logistics partner
+  if (!isLagos) {
+    const stateName = capitaliseFirst(deliveryState ?? 'your state')
+    const logisticsMsg =
+      `📦 We deliver to *${stateName}*!\n\n` +
+      `Please choose your preferred shipping method:`
+    await sendButtonsMessage(ctx.botToken, ctx.chatId, logisticsMsg, [
+      { id: 'logistics_gig', title: '🚐 GIG Logistics' },
+      { id: 'logistics_park_waybill', title: '📦 Park Waybill' },
+    ])
+    return {
+      newState: {
+        ...ctx.state,
+        phase: 'selecting_logistics',
+        pendingAddress: address,
+        pendingDeliveryMethod: 'delivery',
+      },
+      newCart: ctx.cart,
+      replySent: logisticsMsg,
+    }
+  }
+
+  // Lagos — resolve zone-based delivery fee and show order summary
+  const deliveryFeeKobo = await resolveDeliveryFee(ctx.merchantId, address)
   const totalWithDelivery = ctx.cart.totalKobo + deliveryFeeKobo
 
   const lines = ctx.cart.items.map(
@@ -173,12 +196,69 @@ export async function handleAddressReceived(ctx: ConversationContext): Promise<H
 }
 
 // ----------------------------------------------------------------
+// Step 3b: Logistics chosen (outside Lagos) — show order summary
+// ----------------------------------------------------------------
+
+export async function handleLogisticsSelected(
+  ctx: ConversationContext,
+  logisticsType: 'gig' | 'park_waybill',
+): Promise<HandlerResult> {
+  const address = ctx.state.pendingAddress ?? ''
+
+  // For interstate deliveries we MUST NOT use zone-based fee lookup.
+  // Zone keywords are Lagos-scoped (Ikeja, Lekki, VI, etc.) so an address like
+  // "12 Allen Avenue, Ikeja, Delta" would incorrectly match the Ikeja Lagos zone.
+  // Use the merchant's flat default fee instead — it is intended for non-Lagos orders.
+  const supabase = createAdminClient()
+  const { data: merchant } = await supabase
+    .from('merchants')
+    .select('default_delivery_fee_kobo')
+    .eq('id', ctx.merchantId)
+    .single()
+  const deliveryFeeKobo = merchant?.default_delivery_fee_kobo ?? 0
+
+  const totalWithDelivery = ctx.cart.totalKobo + deliveryFeeKobo
+
+  const logisticsName = logisticsType === 'gig' ? 'GIG Logistics' : 'Park Waybill'
+
+  const lines = ctx.cart.items.map(
+    (item, i) => `${i + 1}. ${item.name}${item.size ? ` (${item.size})` : ''} ×${item.quantity} — ${formatNaira(item.priceKobo * item.quantity)}`
+  )
+
+  const summary =
+    `📋 *Order Summary*\n\n` +
+    `${lines.join('\n')}\n\n` +
+    `📍 Ship to: _${address}_\n` +
+    `🚚 Shipping via: *${logisticsName}*\n` +
+    `📦 Delivery fee: *${deliveryFeeKobo === 0 ? 'Free' : formatNaira(deliveryFeeKobo)}*\n` +
+    `💰 *Total: ${formatNaira(totalWithDelivery)}*\n\n` +
+    `Ready to confirm?`
+
+  await sendButtonsMessage(ctx.botToken, ctx.chatId, summary, [
+    { id: 'confirm_order', title: '✅ Confirm Order' },
+    { id: 'cancel_order', title: '❌ Cancel' },
+  ])
+
+  return {
+    newState: {
+      ...ctx.state,
+      phase: 'confirming_order',
+      pendingLogisticsType: logisticsType,
+      pendingDeliveryMethod: 'delivery',
+    },
+    newCart: { ...ctx.cart, deliveryFeeKobo, totalKobo: totalWithDelivery } as typeof ctx.cart,
+    replySent: summary,
+  }
+}
+
+// ----------------------------------------------------------------
 // Step 4: Confirm order → create DB record + Paystack link
 // ----------------------------------------------------------------
 
 export async function handleConfirmOrder(ctx: ConversationContext): Promise<HandlerResult> {
   const address = ctx.state.pendingAddress ?? 'Not provided'
   const deliveryMethod = ctx.state.pendingDeliveryMethod ?? 'delivery'
+  const logisticsType = ctx.state.pendingLogisticsType   // set only for outside-Lagos orders
   const supabase = createAdminClient()
 
   const ref = `LMD-${Date.now().toString(36).toUpperCase()}`
@@ -236,18 +316,35 @@ export async function handleConfirmOrder(ctx: ConversationContext): Promise<Hand
       })
     }
 
+    // Logistics-specific follow-up note (only for outside-Lagos orders)
+    const logisticsNote =
+      logisticsType === 'park_waybill'
+        ? `\n\n📦 *Park Waybill:* A representative will reach out to confirm your delivery details.`
+        : logisticsType === 'gig'
+          ? `\n\n🚐 *GIG Logistics:* Your order tracking ID and delivery details will be communicated to you.`
+          : ''
+
     const confirmMsg = paystackResult
       ? `🎉 *Order Confirmed!*\n\n` +
         `Reference: \`${order.reference}\`\n` +
         `Total: *${formatNaira(ctx.cart.totalKobo)}*\n\n` +
         `💳 *Pay securely here:*\n${paystackResult.authorization_url}\n\n` +
-        `_Link expires in 30 minutes._`
+        `_Link expires in 30 minutes._` +
+        logisticsNote
       : `🎉 *Order Confirmed!*\n\n` +
         `Reference: \`${order.reference}\`\n` +
         `Total: *${formatNaira(ctx.cart.totalKobo)}*\n\n` +
-        `💳 Our team will send your payment link shortly. Thank you! 🙏`
+        `💳 Our team will send your payment link shortly. Thank you! 🙏` +
+        logisticsNote
 
     await sendTextMessage(ctx.botToken, ctx.chatId, confirmMsg)
+
+    // Ask if the customer wants to continue shopping or is done
+    const followUpMsg = `Is there anything else you'd like to order? 😊`
+    await sendButtonsMessage(ctx.botToken, ctx.chatId, followUpMsg, [
+      { id: 'browse_all', title: '🛍 Shop More' },
+      { id: 'session_done', title: '✅ That\'s All' },
+    ])
 
     logger.info({ orderId: order.id, ref: order.reference, merchantId: ctx.merchantId }, 'Order confirmed')
 
@@ -258,6 +355,7 @@ export async function handleConfirmOrder(ctx: ConversationContext): Promise<Hand
         activeOrderId: order.id,
         pendingAddress: undefined,
         pendingDeliveryMethod: undefined,
+        pendingLogisticsType: undefined,
       },
       newCart: { items: [], totalKobo: 0 },
       replySent: confirmMsg,
@@ -325,4 +423,41 @@ function validateAddress(address: string): { ok: boolean } {
   const wordCount = trimmed.split(/\s+/).filter(Boolean).length
   if (trimmed.length < 10 || wordCount < 3) return { ok: false }
   return { ok: true }
+}
+
+// All 36 Nigerian states + FCT/Abuja, lower-cased for matching.
+// Checked from the end of the address (state appears last) before checking anywhere else.
+const NIGERIAN_STATES = [
+  'abia', 'adamawa', 'akwa ibom', 'anambra', 'bauchi', 'bayelsa', 'benue',
+  'borno', 'cross river', 'delta', 'ebonyi', 'edo', 'ekiti', 'enugu',
+  'fct', 'abuja', 'gombe', 'imo', 'jigawa', 'kaduna', 'kano', 'katsina',
+  'kebbi', 'kogi', 'kwara', 'lagos', 'nasarawa', 'niger', 'ogun', 'ondo',
+  'osun', 'oyo', 'plateau', 'rivers', 'port harcourt', 'sokoto', 'taraba',
+  'yobe', 'zamfara',
+]
+
+/**
+ * Extracts the Nigerian state from an address string.
+ * Prioritises the last comma-separated segment (most addresses end with city, State).
+ * Falls back to scanning the full address if not found in the tail.
+ */
+function extractStateFromAddress(address: string): string | null {
+  const lower = address.toLowerCase()
+  const parts = lower.split(',').map(s => s.trim())
+
+  // Prioritise state: scan from the last segment backwards
+  for (let i = parts.length - 1; i >= 0; i--) {
+    for (const state of NIGERIAN_STATES) {
+      if (parts[i].includes(state)) return state
+    }
+  }
+  // Fallback: check full address string
+  for (const state of NIGERIAN_STATES) {
+    if (lower.includes(state)) return state
+  }
+  return null
+}
+
+function capitaliseFirst(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1)
 }

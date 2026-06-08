@@ -1,4 +1,5 @@
 import { classifyIntent } from '@/lib/ai/classify'
+import { sendButtonsMessage as sendButtons } from '@/lib/telegram/client'
 import { handleGreeting } from './handlers/greeting'
 import { handleBrowse, handleBrowseCategory } from './handlers/browse'
 import {
@@ -15,12 +16,13 @@ import {
   handleDeliveryChosen,
   handlePickupChosen,
   handleAddressReceived,
+  handleLogisticsSelected,
   handleConfirmOrder,
   handleCancelOrder,
 } from './handlers/checkout'
 import { handleOrderStatus } from './handlers/orders'
 import { handleComplaintStart, handleComplaintCategory } from './handlers/complaint'
-import { handleUnknown, handleSupport } from './handlers/fallback'
+import { handleUnknown, handleSupport, handleSocialPhrase, handleSessionDone } from './handlers/fallback'
 import { handleHumanHandoff } from './handlers/handoff'
 import { logger } from '@/lib/utils/logger'
 import type {
@@ -89,6 +91,16 @@ export async function runStateMachine(
     if (!isNaN(qty) && qty > 0) {
       return handleQuantitySelected(ctx, state.activeProductId, Math.min(qty, 10))
     }
+  }
+
+  // Typed text while awaiting logistics choice — re-prompt (buttons only)
+  if (state.phase === 'selecting_logistics') {
+    const msg = `Please choose your shipping method using the buttons above. 😊`
+    await sendButtons(botToken, chatId, msg, [
+      { id: 'logistics_gig', title: '🚐 GIG Logistics' },
+      { id: 'logistics_park_waybill', title: '📦 Park Waybill' },
+    ])
+    return { newState: state, newCart: cart, replySent: msg }
   }
 
   // During size/color selection, typed text is treated as a manual selection
@@ -252,6 +264,13 @@ function routeButtonPayload(payload: string, ctx: ConversationContext): Promise<
   if (payload === 'delivery_choice_delivery') return handleDeliveryChosen(ctx)
   if (payload === 'delivery_choice_pickup')   return handlePickupChosen(ctx)
 
+  // Logistics method (outside Lagos)
+  if (payload === 'logistics_gig')          return handleLogisticsSelected(ctx, 'gig')
+  if (payload === 'logistics_park_waybill') return handleLogisticsSelected(ctx, 'park_waybill')
+
+  // Post-order session end
+  if (payload === 'session_done') return handleSessionDone(ctx)
+
   // Complaint categories
   if (payload === 'complaint_wrong_item') return handleComplaintCategory(ctx, 'wrong_item')
   if (payload === 'complaint_delivery')   return handleComplaintCategory(ctx, 'delivery')
@@ -310,6 +329,7 @@ function routeButtonPayload(payload: string, ctx: ConversationContext): Promise<
 function routeByIntent(intent: Intent, ctx: ConversationContext): Promise<HandlerResult> {
   switch (intent) {
     case 'greeting':        return handleGreeting(ctx)
+    case 'social_phrase':   return handleSocialPhrase(ctx)
     case 'browse_products': return handleBrowse(ctx)
     case 'product_inquiry': return handleProductDetail(ctx)
     case 'add_to_cart':     return handleAddToCart(ctx)
