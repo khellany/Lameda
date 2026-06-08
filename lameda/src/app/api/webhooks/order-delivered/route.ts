@@ -49,14 +49,7 @@ export async function POST(request: NextRequest) {
   // Verify webhook secret
   const secret = request.headers.get('webhook-secret')
   if (secret !== process.env.WEBHOOK_SECRET) {
-    // TEMP DIAGNOSTIC — masked comparison to diagnose secret mismatch (remove after verifying)
-    const mask = (s: string | null | undefined) =>
-      !s ? '<empty>' : `${s.slice(0, 3)}…${s.slice(-3)}(len=${s.length})`
-    const headerNames = [...request.headers.keys()].join(',')
-    logger.warn(
-      { received: mask(secret), expected: mask(process.env.WEBHOOK_SECRET), headerNames },
-      'order-delivered webhook: invalid secret',
-    )
+    logger.warn('order-delivered webhook: invalid secret')
     return NextResponse.json({ ok: true }) // 200 to stop retries
   }
 
