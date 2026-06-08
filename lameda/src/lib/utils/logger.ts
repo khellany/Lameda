@@ -36,14 +36,31 @@ export const logger = pino({
     env: process.env.NODE_ENV,
   },
   redact: {
-    // Never log these fields - PII and secrets
+    // Never log these fields — PII and credentials
+    // Pino redacts by key name at any depth in the logged object.
+    // Add any new sensitive field names here as the schema grows.
     paths: [
       'req.headers.authorization',
+      'req.headers["x-merchant-api-key"]',
+      'req.headers["x-api-key"]',
+      // PII
       'phone',
       'phoneNumber',
+      'phone_number',
       'customerPhone',
       'email',
+      'owner_name',
+      'delivery_address',
+      'display_name',
+      // Credentials — these must never appear in logs even in dev
       'apiKey',
+      'api_key',
+      'botToken',
+      'bot_token',
+      'telegram_bot_token',
+      'token',
+      'webhookSecret',
+      'secret',
     ],
     censor: '[REDACTED]',
   },
