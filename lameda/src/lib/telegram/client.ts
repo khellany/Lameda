@@ -190,6 +190,36 @@ export async function sendListMessage(
 }
 
 /**
+ * Answers a Telegram callback query.
+ *
+ * MUST be called within 10 seconds of receiving a callback_query update —
+ * failing to answer leaves a permanent loading indicator on the button.
+ *
+ * - text + showAlert=true  → modal popup the user must dismiss
+ * - text + showAlert=false → brief toast notification (default)
+ * - no text                → silently clears the loading indicator
+ */
+export async function answerCallbackQuery(
+  botToken: string,
+  callbackQueryId: string,
+  text?: string,
+  showAlert?: boolean,
+): Promise<void> {
+  try {
+    await fetch(`${TELEGRAM_API_BASE}/bot${botToken}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        ...(text ? { text, show_alert: showAlert ?? false } : {}),
+      }),
+    })
+  } catch (err) {
+    logger.warn({ err, callbackQueryId }, 'answerCallbackQuery failed')
+  }
+}
+
+/**
  * Resolves a Telegram file_id into a public download URL.
  *
  * Telegram stores media as opaque file_ids. To download the actual bytes

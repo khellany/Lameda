@@ -205,6 +205,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
 
     // Step 7: Run state machine — replaces Sprint 1 stub
+    // Extract callback_query_id so the state machine can answer it (required by Telegram API)
+    const callbackQueryId = update.callback_query?.id ?? null
+
     const result = await runStateMachine(
       message.text ?? '',
       message.buttonPayload,
@@ -216,6 +219,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       conversationId,
       merchant.telegram_bot_token,
       message.from,
+      callbackQueryId,
     )
 
     // Step 8: Persist updated state and cart

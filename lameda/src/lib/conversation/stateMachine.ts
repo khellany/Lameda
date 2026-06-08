@@ -1,5 +1,5 @@
 import { classifyIntent } from '@/lib/ai/classify'
-import { sendButtonsMessage as sendButtons } from '@/lib/telegram/client'
+import { sendButtonsMessage as sendButtons, answerCallbackQuery } from '@/lib/telegram/client'
 import { handleGreeting } from './handlers/greeting'
 import { handleBrowse, handleBrowseCategory, handleSearchEverythingPrompt } from './handlers/browse'
 import {
@@ -55,6 +55,7 @@ export async function runStateMachine(
   conversationId: string,
   botToken: string,
   chatId: string,
+  callbackQueryId: string | null = null,
 ): Promise<HandlerResult> {
 
   // ----------------------------------------------------------------
@@ -71,6 +72,35 @@ export async function runStateMachine(
   // STEP 1: Button callbacks — no AI needed
   // ----------------------------------------------------------------
   if (buttonPayload) {
+    // Always answer the callback query immediately to clear Telegram's loading indicator.
+    // Fire-and-forget — we don't block the response on this.
+    if (callbackQueryId) {
+      answerCallbackQuery(botToken, callbackQueryId).catch(() => {})
+    }
+
+    // If the session has ended, intercept ALL button presses from the old session.
+    // Show a popup alert and invite the customer to start fresh.
+    if (state.phase === 'completed') {
+      if (callbackQueryId) {
+        // Override the silent answer above with an alert popup
+        await answerCallbackQuery(
+          botToken,
+          callbackQueryId,
+          'This session has ended. Type "Hi" to start a new order! 🛍',
+          true, // show_alert = modal popup, not just a toast
+        )
+      }
+      const restartMsg = `👋 Your previous session has ended.\n\nTap below or type *Hi* to start a new order:`
+      await sendButtons(botToken, chatId, restartMsg, [
+        { id: 'browse_all', title: '🛍 Shop Now' },
+      ])
+      return {
+        newState: { phase: 'greeting', channel: state.channel },
+        newCart: { items: [], totalKobo: 0 },
+        replySent: restartMsg,
+      }
+    }
+
     const ctx = buildCtx({ message, mediaUrl, state, cart, merchantId, customerId, conversationId, botToken, chatId })
     return routeButtonPayload(buttonPayload, ctx)
   }
