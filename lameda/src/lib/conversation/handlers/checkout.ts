@@ -615,21 +615,64 @@ function extractStateFromAddress(address: string): string | null {
   return null
 }
 
+/** Returns true if the segment contains any known Nigerian state or city (whole-word). */
+function containsNigerianLocation(part: string): boolean {
+  for (const state of ALL_STATES) {
+    if (matchesWholeWord(part, state)) return true
+  }
+  for (const city of Object.keys(CITY_TO_STATE)) {
+    if (matchesWholeWord(part, city)) return true
+  }
+  return false
+}
+
 /**
- * Validates that an address is in Nigeria by checking for a recognised Nigerian
- * STATE name (whole-word only). City names are NOT used for validation to prevent
- * common English words like "gate" or "ring road" from matching non-Nigerian addresses.
+ * Validates that an address is in Nigeria.
+ *
+ * Rules:
+ *  - Nigerian state found            → allow (state alone is sufficient)
+ *  - Nigerian city + Nigerian state  → allow
+ *  - Nigerian city, no state         → allow (state inferred from city for routing)
+ *  - Nigerian city + foreign last    → reject ("Surulere, Ghana" fails because
+ *                                      "Ghana" is in the state position and is not Nigerian)
+ *  - No Nigerian location found      → reject
  */
 function isNigerianAddress(address: string): boolean {
   const lower = address.toLowerCase()
   const parts = lower.split(',').map(s => s.trim())
 
+  let hasNigerianState = false
+  let hasNigerianCity = false
+
   for (const part of parts) {
-    for (const state of ALL_STATES) {
-      if (matchesWholeWord(part, state)) return true
+    if (!hasNigerianState) {
+      for (const state of ALL_STATES) {
+        if (matchesWholeWord(part, state)) { hasNigerianState = true; break }
+      }
+    }
+    if (!hasNigerianCity) {
+      for (const city of Object.keys(CITY_TO_STATE)) {
+        if (matchesWholeWord(part, city)) { hasNigerianCity = true; break }
+      }
     }
   }
-  return false
+
+  // No Nigerian location found at all → reject
+  if (!hasNigerianState && !hasNigerianCity) return false
+
+  // Nigerian city found but no Nigerian state — check the last segment.
+  // If it's a real word that doesn't match any Nigerian location, it's likely
+  // a foreign country or state in the "state" position (e.g. "Ghana", "UK").
+  if (hasNigerianCity && !hasNigerianState) {
+    const lastPart = parts[parts.length - 1]
+    // Only flag if the last part is a meaningful word (not just a street number)
+    // and cannot be identified as a Nigerian location
+    if (lastPart.length > 2 && !/^\d+$/.test(lastPart) && !containsNigerianLocation(lastPart)) {
+      return false
+    }
+  }
+
+  return true
 }
 
 function capitaliseFirst(s: string): string {
