@@ -8,13 +8,9 @@ interface RegisterResult {
   success: true
   business_name: string
   api_key: string
-  bot_name?: string
-  webhook_url: string
-  webhook_registered: boolean
-  webhook_error?: string
-  next_steps: {
-    test_bot: string
-  }
+  bot_name: string
+  telegram_link: string
+  email_sent: boolean
 }
 
 interface FormState {
@@ -47,7 +43,7 @@ export default function OnboardPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<RegisterResult | null>(null)
-  const [copied, setCopied] = useState<'api_key' | 'webhook' | null>(null)
+  const [copied, setCopied] = useState(false)
 
   function update(field: keyof FormState, value: string) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -88,10 +84,11 @@ export default function OnboardPage() {
     }
   }
 
-  function copyToClipboard(text: string, field: 'api_key' | 'webhook') {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(field)
-      setTimeout(() => setCopied(null), 2000)
+  function copyApiKey() {
+    if (!result) return
+    navigator.clipboard.writeText(result.api_key).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
     })
   }
 
@@ -99,6 +96,8 @@ export default function OnboardPage() {
     return (
       <div className="min-h-screen bg-zinc-50 flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm border border-zinc-100 p-8">
+
+          {/* Header */}
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-xl">✓</div>
             <div>
@@ -107,72 +106,59 @@ export default function OnboardPage() {
             </div>
           </div>
 
-          {!result.webhook_registered && (
-            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-              <strong>Webhook not registered:</strong> {result.webhook_error}.<br />
-              You&rsquo;ll need to set it manually in Telegram. Use the URL below.
-            </div>
-          )}
-
-          {result.webhook_registered && (
-            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
-              ✓ Telegram webhook registered — your bot is live and receiving messages.
-            </div>
-          )}
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1 uppercase tracking-wide">
-                API Key <span className="text-red-500 font-normal">(save this — shown once)</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 block bg-zinc-900 text-green-400 text-sm rounded-lg px-3 py-2.5 font-mono overflow-x-auto">
-                  {result.api_key}
-                </code>
-                <button
-                  onClick={() => copyToClipboard(result.api_key, 'api_key')}
-                  className="shrink-0 px-3 py-2.5 text-sm bg-zinc-100 hover:bg-zinc-200 rounded-lg transition-colors"
-                >
-                  {copied === 'api_key' ? 'Copied!' : 'Copy'}
-                </button>
-              </div>
-            </div>
-
-            {/* Only show webhook URL if auto-registration failed — merchant needs it for manual setup */}
-            {!result.webhook_registered && (
-              <div>
-                <label className="block text-xs font-medium text-zinc-500 mb-1 uppercase tracking-wide">
-                  Webhook URL <span className="text-amber-600 font-normal">(set this manually in Telegram)</span>
-                </label>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 block bg-zinc-50 text-zinc-700 text-xs rounded-lg px-3 py-2.5 font-mono overflow-x-auto border border-zinc-200">
-                    {result.webhook_url}
-                  </code>
-                  <button
-                    onClick={() => copyToClipboard(result.webhook_url, 'webhook')}
-                    className="shrink-0 px-3 py-2.5 text-sm bg-zinc-100 hover:bg-zinc-200 rounded-lg transition-colors"
-                  >
-                    {copied === 'webhook' ? 'Copied!' : 'Copy'}
-                  </button>
-                </div>
-              </div>
-            )}
+          {/* Email confirmation notice */}
+          <div className="mb-5 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+            📧 Your API key and login details have been sent to your email. Keep that email safe.
           </div>
 
-          <div className="mt-6 p-4 bg-zinc-50 rounded-xl border border-zinc-100">
+          {/* API Key — shown once on screen */}
+          <div className="mb-5">
+            <label className="block text-xs font-medium text-zinc-500 mb-1.5 uppercase tracking-wide">
+              API Key <span className="text-red-500 font-normal">(copy this — shown once)</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 block bg-zinc-900 text-green-400 text-sm rounded-lg px-3 py-2.5 font-mono overflow-x-auto">
+                {result.api_key}
+              </code>
+              <button
+                onClick={copyApiKey}
+                className="shrink-0 px-3 py-2.5 text-sm bg-zinc-100 hover:bg-zinc-200 rounded-lg transition-colors"
+              >
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          </div>
+
+          {/* Primary CTA — open bot on Telegram */}
+          <a
+            href={result.telegram_link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-zinc-900 text-white text-sm font-semibold rounded-xl hover:bg-zinc-800 transition-colors mb-3"
+          >
+            <span>📲</span>
+            <span>Open your bot on Telegram</span>
+          </a>
+
+          {/* Secondary CTA — CRM portal */}
+          <a
+            href="/login"
+            className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-zinc-50 text-zinc-700 text-sm font-semibold rounded-xl border border-zinc-200 hover:bg-zinc-100 transition-colors mb-6"
+          >
+            <span>📊</span>
+            <span>Go to your merchant dashboard</span>
+          </a>
+
+          {/* Next steps */}
+          <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-100">
             <h2 className="text-sm font-semibold text-zinc-800 mb-3">Next steps</h2>
             <ol className="text-sm text-zinc-600 space-y-2 list-decimal list-inside">
-              <li>
-                <strong>Add your products</strong> — import your catalogue using the API key above
-              </li>
-              <li>
-                <strong>Test your bot</strong> — {result.next_steps.test_bot}
-              </li>
-              <li>
-                <strong>Share with customers</strong> — send them your bot link and start taking orders
-              </li>
+              <li><strong>Add your products</strong> — import your catalogue using the API key above</li>
+              <li><strong>Test your bot</strong> — tap the Telegram button and send a message</li>
+              <li><strong>Share with customers</strong> — send them <strong>t.me/{result.bot_name}</strong> to start ordering</li>
             </ol>
           </div>
+
         </div>
       </div>
     )

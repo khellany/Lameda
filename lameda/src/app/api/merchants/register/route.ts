@@ -5,6 +5,8 @@ import { validateBotToken, registerTelegramWebhook } from '@/lib/telegram/webhoo
 import { encryptPii } from '@/lib/crypto/pii'
 import { hashForSearch } from '@/lib/crypto/hash'
 import { logger } from '@/lib/utils/logger'
+import { getEmailClient, FROM_ADDRESS } from '@/lib/email/client'
+import { buildMerchantWelcomeEmail } from '@/lib/email/templates/merchant-welcome'
 import type { BusinessType } from '@/lib/merchant/config'
 
 const RegisterSchema = z.object({
@@ -45,26 +47,20 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient()
 
-  // Check if this bot token is already registered.
-  // We store bot tokens encrypted, so we cannot query by token value directly.
-  // Instead, hash the token for a fast indexed duplicate check.
-  // (bot token hash column is added as tech debt — for now do a range scan on active merchants)
-  // For MVP: duplicate check is best-effort; Telegram itself rejects a second setWebhook.
-
   // Generate a per-merchant API key before insert
   const apiKey = `lmd_${crypto.randomUUID().replace(/-/g, '')}`
 
   // Encrypt PII fields before writing to database
-  const encryptedEmail       = encryptPii(data.email)
-  const encryptedOwnerName   = encryptPii(data.owner_name)
-  const encryptedBotToken    = encryptPii(data.telegram_bot_token)
-  const emailHash            = hashForSearch(data.email)
+  const encryptedEmail     = encryptPii(data.email)
+  const encryptedOwnerName = encryptPii(data.owner_name)
+  const encryptedBotToken  = encryptPii(data.telegram_bot_token)
+  const emailHash          = hashForSearch(data.email)
 
   // Insert merchant row — all PII fields are ciphertext from here
   const { data: merchant, error: insertError } = await supabase
     .from('merchants')
     .insert({
-      business_name: data.business_name,       // business name is not PII
+      business_name: data.business_name,
       owner_name: encryptedOwnerName,
       email: encryptedEmail,
       email_hash: emailHash,
@@ -83,42 +79,58 @@ export async function POST(request: NextRequest) {
 
   if (insertError || !merchant) {
     logger.error({ err: insertError }, 'Merchant insert failed')
-    // Temporary: expose DB error for debugging (remove after diagnosis)
-    return NextResponse.json({
-      error: 'Registration failed. Please try again.',
-      _debug: { code: insertError?.code, message: insertError?.message, details: insertError?.details, hint: insertError?.hint },
-    }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Registration failed. Please try again.' },
+      { status: 500 },
+    )
   }
 
-  // Register Telegram webhook using the PLAINTEXT token (before it leaves this scope).
-  // We use data.telegram_bot_token here, not the encrypted value from the DB.
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
-  const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET ?? ''
+  const resolvedBotName = botName ?? data.business_name
+
+  // Register Telegram webhook using the plaintext token (in-memory, never re-read from DB)
   const webhookResult = await registerTelegramWebhook(
-    data.telegram_bot_token, // plaintext — we have it in memory, no need to decrypt
+    data.telegram_bot_token,
     merchant.id,
     appUrl,
-    webhookSecret,
+    process.env.TELEGRAM_WEBHOOK_SECRET ?? '',
   )
-
-  const webhookUrl = `${appUrl}/api/webhook/telegram/${merchant.id}`
 
   logger.info(
     { merchantId: merchant.id, webhookOk: webhookResult.ok },
     'Merchant registered via self-service',
   )
 
+  // Send welcome email with API key + Telegram deep link + CRM portal link.
+  // Non-blocking: email failure should not prevent a successful registration response.
+  const { subject, html, text } = buildMerchantWelcomeEmail({
+    ownerName: data.owner_name,
+    businessName: data.business_name,
+    botName: resolvedBotName,
+    apiKey,
+    appUrl,
+  })
+
+  try {
+    await getEmailClient().emails.send({
+      from: FROM_ADDRESS,
+      to: data.email,
+      subject,
+      html,
+      text,
+    })
+    logger.info({ merchantId: merchant.id }, 'Welcome email sent')
+  } catch (emailErr) {
+    // Log but don't fail — merchant is registered, they saw the key on screen
+    logger.error({ err: emailErr, merchantId: merchant.id }, 'Welcome email failed to send')
+  }
+
   return NextResponse.json({
     success: true,
-    merchant_id: merchant.id,
-    business_name: merchant.business_name, // not encrypted
-    api_key: apiKey,                        // generated in this request — not from DB
-    bot_name: botName,
-    webhook_url: webhookUrl,
-    webhook_registered: webhookResult.ok,
-    webhook_error: webhookResult.ok ? undefined : webhookResult.description,
-    next_steps: {
-      test_bot: `Open Telegram and message @${botName ?? 'your_bot'} to test`,
-    },
+    business_name: merchant.business_name,
+    api_key: apiKey,
+    bot_name: resolvedBotName,
+    telegram_link: `https://t.me/${resolvedBotName}?start=${apiKey}`,
+    email_sent: true,
   })
 }
