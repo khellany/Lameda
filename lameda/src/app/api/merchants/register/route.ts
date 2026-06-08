@@ -18,6 +18,14 @@ const RegisterSchema = z.object({
   telegram_bot_token: z.string().min(10),
 })
 
+/** Generate a readable temporary password: 3 word-segments + numbers */
+function generateTempPassword(): string {
+  const words = ['palm', 'bolt', 'jade', 'nova', 'reef', 'dusk', 'sage', 'kite', 'lime', 'wren']
+  const pick = () => words[Math.floor(Math.random() * words.length)]
+  const digits = Math.floor(1000 + Math.random() * 9000)
+  return `${pick()}-${pick()}-${digits}`
+}
+
 export async function POST(request: NextRequest) {
   let body: unknown
   try {
@@ -47,8 +55,39 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient()
 
-  // Generate a per-merchant API key before insert
+  // Generate a per-merchant API key
   const apiKey = `lmd_${crypto.randomUUID().replace(/-/g, '')}`
+
+  // Generate a temporary CRM password — sent in welcome email, merchant changes on first login
+  const tempPassword = generateTempPassword()
+
+  // Create Supabase auth account for the merchant (email already confirmed — they typed it here)
+  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    email: data.email,
+    password: tempPassword,
+    email_confirm: true, // skip verification email — we send our own welcome email
+    user_metadata: {
+      full_name: data.owner_name,
+      business_name: data.business_name,
+    },
+  })
+
+  if (authError) {
+    // email_already_exists means they've registered before
+    if (authError.message?.toLowerCase().includes('already')) {
+      return NextResponse.json(
+        { error: 'An account with this email already exists. Please log in to your merchant dashboard.' },
+        { status: 409 },
+      )
+    }
+    logger.error({ err: authError }, 'Auth user creation failed')
+    return NextResponse.json(
+      { error: 'Registration failed. Please try again.' },
+      { status: 500 },
+    )
+  }
+
+  const authUserId = authData.user.id
 
   // Encrypt PII fields before writing to database
   const encryptedEmail     = encryptPii(data.email)
@@ -56,7 +95,7 @@ export async function POST(request: NextRequest) {
   const encryptedBotToken  = encryptPii(data.telegram_bot_token)
   const emailHash          = hashForSearch(data.email)
 
-  // Insert merchant row — all PII fields are ciphertext from here
+  // Insert merchant row — all PII fields are ciphertext
   const { data: merchant, error: insertError } = await supabase
     .from('merchants')
     .insert({
@@ -72,12 +111,15 @@ export async function POST(request: NextRequest) {
       subscription_status: 'trial',
       trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       api_key: apiKey,
+      auth_user_id: authUserId,
       is_active: true,
     })
     .select('id, business_name, api_key')
     .single()
 
   if (insertError || !merchant) {
+    // Clean up the auth user we just created so they're not orphaned
+    await supabase.auth.admin.deleteUser(authUserId).catch(() => null)
     logger.error({ err: insertError }, 'Merchant insert failed')
     return NextResponse.json(
       { error: 'Registration failed. Please try again.' },
@@ -88,7 +130,7 @@ export async function POST(request: NextRequest) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
   const resolvedBotName = botName ?? data.business_name
 
-  // Register Telegram webhook using the plaintext token (in-memory, never re-read from DB)
+  // Register Telegram webhook
   const webhookResult = await registerTelegramWebhook(
     data.telegram_bot_token,
     merchant.id,
@@ -101,13 +143,14 @@ export async function POST(request: NextRequest) {
     'Merchant registered via self-service',
   )
 
-  // Send welcome email with API key + Telegram deep link + CRM portal link.
-  // Non-blocking: email failure should not prevent a successful registration response.
+  // Send welcome email with credentials + Telegram deep link + step-by-step guide
   const { subject, html, text } = buildMerchantWelcomeEmail({
     ownerName: data.owner_name,
     businessName: data.business_name,
     botName: resolvedBotName,
     apiKey,
+    tempPassword,
+    loginEmail: data.email,
     appUrl,
   })
 
@@ -121,7 +164,6 @@ export async function POST(request: NextRequest) {
     })
     logger.info({ merchantId: merchant.id }, 'Welcome email sent')
   } catch (emailErr) {
-    // Log but don't fail — merchant is registered, they saw the key on screen
     logger.error({ err: emailErr, merchantId: merchant.id }, 'Welcome email failed to send')
   }
 
