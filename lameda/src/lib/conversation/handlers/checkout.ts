@@ -38,14 +38,18 @@ export async function handleCheckoutStart(ctx: ConversationContext): Promise<Han
 
   const hasPickup = !!merchant?.pickup_address
 
-  // If only delivery is available, confirm the method to the customer before asking for address
+  // Delivery-only: confirm delivery is selected and immediately ask for address.
+  // Going straight to collecting_address ensures pendingDeliveryMethod is set
+  // before handleAddressReceived runs, preventing the delivery-method-missing bug.
   if (!hasPickup) {
-    const deliveryMsg = `📦 Your order will be delivered to you.\n\nPlease send your delivery address to continue.`
-    await sendButtonsMessage(ctx.botToken, ctx.chatId, deliveryMsg, [
-      { id: 'delivery_choice_delivery', title: '📍 Enter Address' },
-    ])
+    const deliveryMsg =
+      `🏍 *Delivery selected.*\n\n` +
+      `📍 Please send your delivery address.\n\n` +
+      `Format: house number, street, area, city, and state.\n` +
+      `_Example: 12 Adeniyi Jones, Ikeja, Lagos_`
+    await sendTextMessage(ctx.botToken, ctx.chatId, deliveryMsg)
     return {
-      newState: { ...ctx.state, phase: 'selecting_delivery' },
+      newState: { ...ctx.state, phase: 'collecting_address', pendingDeliveryMethod: 'delivery' },
       newCart: ctx.cart,
       replySent: deliveryMsg,
     }
@@ -338,8 +342,10 @@ export async function handleConfirmOrder(ctx: ConversationContext): Promise<Hand
         logisticsNote
 
       await sendTextMessage(ctx.botToken, ctx.chatId, mockMsg)
-      const followUpMsg = `Is there anything else you'd like to order? 😊`
-      await sendButtonsMessage(ctx.botToken, ctx.chatId, followUpMsg, [
+
+      // In mock mode, payment is instant — show follow-up immediately
+      const mockFollowUp = `Is there anything else you'd like to order? 😊`
+      await sendButtonsMessage(ctx.botToken, ctx.chatId, mockFollowUp, [
         { id: 'browse_all', title: '🛍 Shop More' },
         { id: 'session_done', title: '✅ That\'s All' },
       ])
@@ -425,19 +431,14 @@ export async function handleConfirmOrder(ctx: ConversationContext): Promise<Hand
 
     await sendTextMessage(ctx.botToken, ctx.chatId, confirmMsg)
 
-    // Ask if the customer wants to continue shopping or is done
-    const followUpMsg = `Is there anything else you'd like to order? 😊`
-    await sendButtonsMessage(ctx.botToken, ctx.chatId, followUpMsg, [
-      { id: 'browse_all', title: '🛍 Shop More' },
-      { id: 'session_done', title: '✅ That\'s All' },
-    ])
-
-    logger.info({ orderId: order.id, ref: order.reference, merchantId: ctx.merchantId }, 'Order confirmed')
+    // Phase moves to payment_pending — the Paystack webhook will send
+    // the "Is there anything else?" follow-up after payment is confirmed.
+    logger.info({ orderId: order.id, ref: order.reference, merchantId: ctx.merchantId }, 'Order confirmed — awaiting payment')
 
     return {
       newState: {
         ...ctx.state,
-        phase: 'completed',
+        phase: 'payment_pending',
         activeOrderId: order.id,
         pendingAddress: undefined,
         pendingDeliveryMethod: undefined,
@@ -517,17 +518,17 @@ function validateAddress(address: string): { ok: boolean } {
  * Used to: (a) detect state from address, (b) confirm the address is in Nigeria.
  */
 const NIGERIA_LOCATIONS: Record<string, string[]> = {
-  'lagos': ['ikeja', 'lekki', 'victoria island', 'vi', 'ikoyi', 'surulere', 'yaba', 'mushin', 'oshodi',
+  'lagos': ['ikeja', 'lekki', 'victoria island', 'ikoyi', 'surulere', 'yaba', 'mushin', 'oshodi',
     'agege', 'alimosho', 'badagry', 'epe', 'ibeju-lekki', 'ifako-ijaiye', 'ikorodu', 'kosofe',
-    'lagos island', 'lagos mainland', 'shomolu', 'apapa', 'ajah', 'festac', 'ojo', 'amuwo-odofin',
-    'gbagada', 'magodo', 'ojota', 'anthony', 'maryland', 'berger', 'sangotedo', 'awoyaya'],
+    'lagos island', 'lagos mainland', 'shomolu', 'apapa', 'ajah', 'festac', 'amuwo-odofin',
+    'gbagada', 'magodo', 'ojota', 'sangotedo', 'awoyaya'],
   'abuja': ['garki', 'wuse', 'maitama', 'asokoro', 'gwarinpa', 'kubwa', 'nyanya', 'karu',
     'lugbe', 'gwagwalada', 'bwari', 'abaji', 'kuje', 'kwali', 'jabi', 'wuye', 'utako'],
   'fct': ['garki', 'wuse', 'maitama', 'asokoro', 'gwarinpa', 'kubwa', 'nyanya', 'karu', 'lugbe'],
   'rivers': ['port harcourt', 'bonny', 'obio-akpor', 'okrika', 'eleme', 'oyigbo', 'rumuola',
     'rumuokoro', 'rumuola', 'rumuigbo', 'diobu', 'trans-amadi', 'mile 1', 'mile 3'],
-  'oyo': ['ibadan', 'ogbomoso', 'oyo', 'iseyin', 'saki', 'eruwa', 'lanlate', 'igboho',
-    'mokola', 'bodija', 'ring road', 'dugbe', 'challenge', 'ojoo', 'gate'],
+  'oyo': ['ibadan', 'ogbomoso', 'iseyin', 'saki', 'eruwa', 'lanlate', 'igboho',
+    'mokola', 'bodija', 'dugbe', 'ojoo'],
   'kano': ['kano city', 'nassarawa', 'ungogo', 'fagge', 'dala', 'gwale', 'kumbotso',
     'tarauni', 'doguwa', 'bichi', 'gwarzo', 'sumaila', 'dawakin tofa', 'tofa'],
   'delta': ['warri', 'asaba', 'sapele', 'ughelli', 'agbor', 'ozoro', 'abraka', 'oleh',
@@ -578,41 +579,57 @@ for (const [state, cities] of Object.entries(NIGERIA_LOCATIONS)) {
   }
 }
 
+/** Matches a term as a complete word (not a substring of another word). */
+function matchesWholeWord(text: string, term: string): boolean {
+  // Escape special regex characters in the term, then wrap in word boundaries
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`\\b${escaped}\\b`).test(text)
+}
+
 /**
  * Extracts the Nigerian state from an address string.
- * Priority: last comma segment → full address for state names → city names.
- * Returns null if no Nigerian location is found at all.
+ * Priority: last comma-segment → full address scan for state names → city name inference.
+ * Uses whole-word matching to prevent substring false-positives (e.g. "ring road" ≠ Lagos).
  */
 function extractStateFromAddress(address: string): string | null {
   const lower = address.toLowerCase()
   const parts = lower.split(',').map(s => s.trim())
 
-  // 1. Scan comma segments from the tail (state is usually last)
+  // 1. Scan segments tail-first — state is usually the last comma-segment
   for (let i = parts.length - 1; i >= 0; i--) {
     for (const state of ALL_STATES) {
-      if (parts[i].includes(state)) return state
+      if (matchesWholeWord(parts[i], state)) return state
     }
   }
 
-  // 2. Scan full address for state name
+  // 2. Full address scan for state names
   for (const state of ALL_STATES) {
-    if (lower.includes(state)) return state
+    if (matchesWholeWord(lower, state)) return state
   }
 
-  // 3. Try to infer state from a recognizable city name
+  // 3. Infer state from city name (fallback — only after state-name checks pass)
   for (const [city, state] of Object.entries(CITY_TO_STATE)) {
-    if (lower.includes(city)) return state
+    if (matchesWholeWord(lower, city)) return state
   }
 
   return null
 }
 
 /**
- * Returns true if the address contains at least one recognizable Nigerian location
- * (state name or major city). Used to reject addresses that are clearly not in Nigeria.
+ * Validates that an address is in Nigeria by checking for a recognised Nigerian
+ * STATE name (whole-word only). City names are NOT used for validation to prevent
+ * common English words like "gate" or "ring road" from matching non-Nigerian addresses.
  */
 function isNigerianAddress(address: string): boolean {
-  return extractStateFromAddress(address) !== null
+  const lower = address.toLowerCase()
+  const parts = lower.split(',').map(s => s.trim())
+
+  for (const part of parts) {
+    for (const state of ALL_STATES) {
+      if (matchesWholeWord(part, state)) return true
+    }
+  }
+  return false
 }
 
 function capitaliseFirst(s: string): string {

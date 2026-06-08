@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
-import { sendTextMessage } from '@/lib/telegram/client'
+import { sendButtonsMessage } from '@/lib/telegram/client'
 import { formatNaira } from '@/lib/ai/respond'
 import { logger } from '@/lib/utils/logger'
 
@@ -100,9 +100,11 @@ export async function GET(request: NextRequest) {
         `❌ *Order Cancelled — ${order.reference}*\n\n` +
         `Your payment link expired before payment was completed.\n\n` +
         `Total was: *${formatNaira(order.total_kobo)}*\n\n` +
-        `If you'd still like to order, simply browse our products and checkout again. 🛍`
+        `Would you like to place a new order?`
 
-      await sendTextMessage(merchant.telegram_bot_token, customer.phone_number, msg)
+      await sendButtonsMessage(merchant.telegram_bot_token, customer.phone_number, msg, [
+        { id: 'browse_all', title: '🛍 Shop Again' },
+      ])
     }
 
     logger.info({ orderId: order.id, ref: order.reference }, 'Order cancelled — payment link expired')

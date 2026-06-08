@@ -60,6 +60,7 @@ export type ConversationPhase =
   | 'cart_review'
   | 'collecting_address'
   | 'confirming_order'
+  | 'payment_pending'       // Payment link sent — waiting for Paystack webhook
   | 'payment_sent'
   | 'completed'
   | 'support'

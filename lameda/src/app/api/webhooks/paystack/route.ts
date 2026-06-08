@@ -15,7 +15,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyWebhookSignature, type PaystackChargeEvent } from '@/lib/payments/paystack'
-import { sendTextMessage } from '@/lib/telegram/client'
+import { sendTextMessage, sendButtonsMessage } from '@/lib/telegram/client'
 import { createAdminClient } from '@/lib/supabase/server'
 import { formatNaira } from '@/lib/ai/respond'
 import { logger } from '@/lib/utils/logger'
@@ -97,6 +97,13 @@ export async function POST(request: NextRequest) {
       `You'll hear from us soon with delivery details! 🎉`
 
     await sendTextMessage(merchant.telegram_bot_token, customer.phone_number, confirmMsg)
+
+    // Post-payment follow-up — only shown after payment is actually confirmed
+    const followUpMsg = `Is there anything else you'd like to order? 😊`
+    await sendButtonsMessage(merchant.telegram_bot_token, customer.phone_number, followUpMsg, [
+      { id: 'browse_all', title: '🛍 Shop More' },
+      { id: 'session_done', title: '✅ That\'s All' },
+    ])
   }
 
   // Step 6: Update conversation state to completed
@@ -104,7 +111,7 @@ export async function POST(request: NextRequest) {
     await supabase
       .from('conversations')
       .update({
-        state: { phase: 'completed', channel: 'telegram' },
+        state: { phase: 'completed', channel: 'telegram', activeOrderId: order.id },
         last_message_at: new Date().toISOString(),
       })
       .eq('id', order.conversation_id)
