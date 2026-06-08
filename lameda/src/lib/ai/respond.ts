@@ -59,6 +59,50 @@ Category: ${product.category ?? 'Fashion'}`
   }
 }
 
+/**
+ * Analyse a customer's photo and extract fashion search keywords.
+ *
+ * Accepts a base64-encoded image. Returns 2–4 keywords suitable for
+ * feeding into searchProducts() (e.g. "ankara dress", "lace fabric").
+ * Returns an empty string if Claude cannot identify a fashion item.
+ */
+export async function analyzeProductImage(
+  imageBase64: string,
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp' = 'image/jpeg',
+): Promise<string> {
+  try {
+    const response = await getAIClient().messages.create({
+      model: AI_MODELS.responder,
+      max_tokens: 60,
+      system: BASE_SYSTEM,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: mimeType, data: imageBase64 },
+            },
+            {
+              type: 'text',
+              text:
+                'This customer wants to find a similar product in a Nigerian fashion store. ' +
+                'Identify the clothing or fabric item shown and return 2–4 search keywords only ' +
+                '(e.g. "ankara dress", "palazzo trousers", "lace agbada"). ' +
+                'Return ONLY the keywords — no sentences, no punctuation.',
+            },
+          ],
+        },
+      ],
+    })
+
+    return response.content[0].type === 'text' ? response.content[0].text.trim() : ''
+  } catch (err) {
+    logger.error({ err }, 'Image analysis failed')
+    return ''
+  }
+}
+
 /** Generate a support reply for customer complaints or complex questions */
 export async function generateSupportReply(customerMessage: string): Promise<string> {
   try {

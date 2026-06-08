@@ -46,8 +46,9 @@ export type ConversationPhase =
   | 'greeting'
   | 'browsing'
   | 'product_detail'
-  | 'selecting_size'     // Waiting for customer to choose a size
-  | 'selecting_color'    // Waiting for customer to choose a color
+  | 'selecting_size'        // Waiting for customer to choose a size
+  | 'selecting_color'       // Waiting for customer to choose a color
+  | 'searching_by_image'    // Waiting for customer to send a photo
   | 'cart_review'
   | 'collecting_address'
   | 'confirming_order'
@@ -120,6 +121,8 @@ export interface ConversationContext {
   cart: Cart
   intent: ClassifiedIntent
   rawMessage: string
+  /** Telegram file_id when the customer sent a photo or document */
+  mediaUrl: string | null
 }
 
 // ----------------------------------------------------------------

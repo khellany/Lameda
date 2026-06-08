@@ -148,6 +148,35 @@ export async function sendListMessage(
 }
 
 /**
+ * Resolves a Telegram file_id into a public download URL.
+ *
+ * Telegram stores media as opaque file_ids. To download the actual bytes
+ * you first call getFile which returns a file_path, then build the URL:
+ *   https://api.telegram.org/file/bot{token}/{file_path}
+ *
+ * The bot token appears in this URL — never expose it client-side.
+ */
+export async function resolveTelegramFileUrl(
+  botToken: string,
+  fileId: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(`${TELEGRAM_API_BASE}/bot${botToken}/getFile?file_id=${fileId}`)
+    const data = await res.json()
+
+    if (!data.ok || !data.result?.file_path) {
+      logger.error({ fileId, error: data.description }, 'Telegram getFile failed')
+      return null
+    }
+
+    return `${TELEGRAM_API_BASE}/file/bot${botToken}/${data.result.file_path}`
+  } catch (err) {
+    logger.error({ err, fileId }, 'Telegram getFile network error')
+    return null
+  }
+}
+
+/**
  * Registers a webhook URL with Telegram for a given bot.
  * Call this once after deployment or whenever the URL changes.
  *

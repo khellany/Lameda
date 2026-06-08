@@ -7,6 +7,7 @@ import {
   handleSizeSelected,
   handleColorSelected,
 } from './handlers/product'
+import { handleSearchByPhoto, handleImageReceived } from './handlers/image'
 import { handleViewCart, handleClearCart } from './handlers/cart'
 import {
   handleCheckoutStart,
@@ -38,6 +39,7 @@ import type {
 export async function runStateMachine(
   message: string,
   buttonPayload: string | null,
+  mediaUrl: string | null,
   state: ConversationState,
   cart: Cart,
   merchantId: string,
@@ -48,14 +50,24 @@ export async function runStateMachine(
 ): Promise<HandlerResult> {
 
   // ----------------------------------------------------------------
+  // STEP 0: Photo message — highest priority, handled from any phase
+  // If the customer sent a photo (mediaUrl is a Telegram file_id),
+  // route directly to image search regardless of current phase.
+  // ----------------------------------------------------------------
+  if (mediaUrl && !buttonPayload) {
+    const ctx = buildCtx({ message, mediaUrl, state, cart, merchantId, customerId, conversationId, botToken, chatId })
+    return handleImageReceived(ctx, mediaUrl)
+  }
+
+  // ----------------------------------------------------------------
   // STEP 1: Button callbacks — no AI needed
   // ----------------------------------------------------------------
   if (buttonPayload) {
-    const ctx = buildCtx({ message, state, cart, merchantId, customerId, conversationId, botToken, chatId })
+    const ctx = buildCtx({ message, mediaUrl, state, cart, merchantId, customerId, conversationId, botToken, chatId })
     return routeButtonPayload(buttonPayload, ctx)
   }
 
-  const ctx = buildCtx({ message, state, cart, merchantId, customerId, conversationId, botToken, chatId })
+  const ctx = buildCtx({ message, mediaUrl, state, cart, merchantId, customerId, conversationId, botToken, chatId })
 
   // ----------------------------------------------------------------
   // STEP 2: Phase-locked routing
@@ -180,6 +192,8 @@ function routeButtonPayload(payload: string, ctx: ConversationContext): Promise<
     return handleColorSelected(ctx, productId, selectedColor)
   }
 
+  if (payload === 'search_by_photo') return handleSearchByPhoto(ctx)
+
   if (payload === 'browse_all') {
     ctx.intent = { intent: 'browse_products', confidence: 'high', entities: {}, raw: payload }
     return handleBrowse(ctx)
@@ -240,6 +254,7 @@ function routeByIntent(intent: Intent, ctx: ConversationContext): Promise<Handle
 // ----------------------------------------------------------------
 function buildCtx(params: {
   message: string
+  mediaUrl: string | null
   state: ConversationState
   cart: Cart
   merchantId: string
@@ -257,6 +272,7 @@ function buildCtx(params: {
     state: params.state,
     cart: params.cart,
     rawMessage: params.message,
+    mediaUrl: params.mediaUrl,
     intent: { intent: 'unknown', confidence: 'low', entities: {}, raw: params.message },
   }
 }

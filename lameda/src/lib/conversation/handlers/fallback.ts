@@ -16,6 +16,7 @@ export async function handleUnknown(ctx: ConversationContext): Promise<HandlerRe
 
   await sendButtonsMessage(ctx.botToken, ctx.chatId, msg, [
     { id: 'browse_all', title: '🛍 Browse Products' },
+    { id: 'search_by_photo', title: '📸 Search by Photo' },
     { id: 'view_cart', title: '🛒 View Cart' },
     { id: 'support', title: '💬 Get Help' },
   ])

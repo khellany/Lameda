@@ -208,6 +208,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const result = await runStateMachine(
       message.text ?? '',
       message.buttonPayload,
+      message.type === 'media' ? message.mediaUrl : null, // only pass file_id for photo/doc messages
       convState,
       convCart,
       merchant.id,

@@ -14,6 +14,7 @@ export async function handleGreeting(ctx: ConversationContext): Promise<HandlerR
 
   await sendButtonsMessage(ctx.botToken, ctx.chatId, welcomeText, [
     { id: 'browse_all', title: '🛍 Browse Products' },
+    { id: 'search_by_photo', title: '📸 Search by Photo' },
     { id: 'view_cart', title: '🛒 View My Cart' },
     { id: 'support', title: '💬 Get Help' },
   ])
