@@ -52,6 +52,7 @@ export interface Database {
           business_type: BusinessType
           merchant_config: Json
           api_key: string | null
+          email_hash: string | null
         }
         Insert: {
           business_name: string
@@ -71,6 +72,7 @@ export interface Database {
           business_type?: BusinessType
           merchant_config?: Json
           api_key?: string | null
+          email_hash?: string | null
         }
         Update: {
           business_name?: string
@@ -88,6 +90,7 @@ export interface Database {
           business_type?: BusinessType
           merchant_config?: Json
           api_key?: string | null
+          email_hash?: string | null
           is_active?: boolean
           telegram_bot_token?: string | null
         }

@@ -7,6 +7,7 @@ import { runStateMachine } from '@/lib/conversation/stateMachine'
 import { sendTextMessage } from '@/lib/telegram/client'
 import { checkCustomerRateLimit } from '@/lib/utils/rateLimit'
 import { getMerchantConfig, type BusinessType } from '@/lib/merchant/config'
+import { safeDecrypt } from '@/lib/crypto/pii'
 import type { ConversationState, Cart } from '@/lib/conversation/types'
 
 /**
@@ -118,6 +119,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ ok: true })
     }
 
+    // Decrypt the bot token — stored as AES-256-GCM ciphertext (Sprint 5)
+    // safeDecrypt() returns plaintext as-is for legacy unencrypted rows
+    const botToken = safeDecrypt(merchant.telegram_bot_token) ?? merchant.telegram_bot_token
+
     // Resolve MerchantConfig from business_type + JSONB overrides (STORY-019)
     const merchantConfig = getMerchantConfig(
       (merchant.business_type as BusinessType) ?? 'general',
@@ -170,7 +175,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       if (!allowed) {
         logger.warn({ customerId: customer.id, merchantId, count }, 'Rate limit exceeded — dropping message')
         await sendTextMessage(
-          merchant.telegram_bot_token,
+          botToken,
           message.from,
           `⏳ You're sending messages too quickly. Please wait a moment before sending another. 😊`,
         )
@@ -250,7 +255,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       merchant.id,
       customer.id,
       conversationId,
-      merchant.telegram_bot_token,
+      botToken,
       message.from,
       callbackQueryId,
       merchantConfig,

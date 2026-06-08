@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { sendButtonsMessage, sendTextMessage } from '@/lib/telegram/client'
 import { formatNaira } from '@/lib/ai/respond'
+import { safeDecrypt } from '@/lib/crypto/pii'
 import { logger } from '@/lib/utils/logger'
 
 interface SupabaseOrderRow {
@@ -81,6 +82,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
+  // Decrypt bot token — stored as AES-256-GCM ciphertext; safeDecrypt handles legacy plaintext
+  const botToken = safeDecrypt(merchant.telegram_bot_token) ?? merchant.telegram_bot_token
+
   // Build item summary from line items
   const lineItems = (record.line_items ?? []) as unknown as CartItem[]
   const itemLines = lineItems.map(
@@ -94,11 +98,11 @@ export async function POST(request: NextRequest) {
     `\nThank you for shopping with us! 😊\n\n` +
     `We'd love to hear how everything went.`
 
-  await sendTextMessage(merchant.telegram_bot_token, customer.phone_number, deliveryMsg)
+  await sendTextMessage(botToken, customer.phone_number, deliveryMsg)
 
   // Offer a quick feedback / support option
   const followUpMsg = `Was everything as expected?`
-  await sendButtonsMessage(merchant.telegram_bot_token, customer.phone_number, followUpMsg, [
+  await sendButtonsMessage(botToken, customer.phone_number, followUpMsg, [
     { id: 'browse_all', title: '🛍 Shop Again' },
     { id: 'support',    title: '⚠️ Report an Issue' },
   ])
