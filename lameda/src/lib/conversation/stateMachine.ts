@@ -380,7 +380,10 @@ function routeButtonPayload(payload: string, ctx: ConversationContext): Promise<
   if (payload === 'checkout') return handleCheckoutStart(ctx)
   if (payload === 'confirm_order') return handleConfirmOrder(ctx)
   if (payload === 'cancel_order') return handleCancelOrder(ctx)
-  if (payload === 'support') return handleSupport(ctx)
+  // "Get Help" opens the structured complaint/help menu — not the generic AI fallback.
+  // The complaint handler already covers all help scenarios with proper categorisation,
+  // complaint references, and escalation to human handoff.
+  if (payload === 'support') return handleComplaintStart(ctx)
 
   if (payload.startsWith('product_')) {
     ctx.intent = {
@@ -423,7 +426,7 @@ function routeByIntent(intent: Intent, ctx: ConversationContext): Promise<Handle
     case 'cancel':          return handleCancelOrder(ctx)
     case 'order_status':    return handleOrderStatus(ctx)
     case 'complaint':       return handleComplaintStart(ctx)
-    case 'support':         return handleSupport(ctx)
+    case 'support':         return handleComplaintStart(ctx)
     case 'unknown':
     default:
       if (/\b(frustrated|angry|useless|rubbish|this is not working)\b/i.test(ctx.rawMessage)) {
