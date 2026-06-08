@@ -1,7 +1,7 @@
 import { classifyIntent } from '@/lib/ai/classify'
 import { sendButtonsMessage as sendButtons } from '@/lib/telegram/client'
 import { handleGreeting } from './handlers/greeting'
-import { handleBrowse, handleBrowseCategory } from './handlers/browse'
+import { handleBrowse, handleBrowseCategory, handleSearchEverythingPrompt } from './handlers/browse'
 import {
   handleProductDetail,
   handleAddToCart,
@@ -283,10 +283,9 @@ function routeButtonPayload(payload: string, ctx: ConversationContext): Promise<
     return handleBrowseCategory(ctx, category)
   }
 
-  // "Search Everything" — bypasses category menu, shows all products
+  // "Search Everything" — prompts the user to type a search term
   if (payload === 'browse_all_products') {
-    ctx.intent = { intent: 'browse_products', confidence: 'high', entities: {}, raw: payload }
-    return handleBrowse(ctx)
+    return handleSearchEverythingPrompt(ctx)
   }
 
   if (payload === 'browse_all') {

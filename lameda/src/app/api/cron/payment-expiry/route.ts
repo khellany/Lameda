@@ -1,24 +1,28 @@
 /**
  * GET /api/cron/payment-expiry
  *
- * Detects expired Paystack payment links and sends the customer a new one.
+ * Finds confirmed orders whose Paystack payment link has expired without payment.
+ * For each: cancels the order, restores product stock, marks payment expired,
+ * and notifies the customer.
  *
- * Checks for orders that are:
- *   - status = 'confirmed' (order placed but not yet paid)
- *   - payment.expires_at < now (Paystack link has expired)
- *   - Not already been re-issued (metadata.reissued flag)
+ * Only ONE payment link is ever generated per order (no reissue).
+ * Non-payment after expiry = cancelled.
  *
  * Schedule (vercel.json): every 15 minutes.
- *
  * Auth: CRON_SECRET header
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
-import { initializeTransaction } from '@/lib/payments/paystack'
 import { sendTextMessage } from '@/lib/telegram/client'
 import { formatNaira } from '@/lib/ai/respond'
 import { logger } from '@/lib/utils/logger'
+
+interface CartItem {
+  productId: string
+  quantity: number
+  name: string
+}
 
 export async function GET(request: NextRequest) {
   const secret = request.headers.get('authorization')?.replace('Bearer ', '')
@@ -29,29 +33,28 @@ export async function GET(request: NextRequest) {
   const supabase = createAdminClient()
   const now = new Date().toISOString()
 
-  // Find expired pending payments
+  // Fetch all pending payments whose link has expired
   const { data: expiredPayments, error } = await supabase
     .from('payments')
-    .select('id, order_id, merchant_id, amount_kobo, paystack_reference, metadata')
+    .select('id, order_id, merchant_id, amount_kobo')
     .eq('status', 'pending')
     .lt('expires_at', now)
-    .not('metadata->reissued', 'eq', 'true')
 
   if (error || !expiredPayments) {
     logger.error({ err: error }, 'Payment expiry cron: failed to fetch payments')
     return NextResponse.json({ ok: false })
   }
 
-  let reissued = 0
+  let cancelled = 0
 
   for (const payment of expiredPayments) {
-    // Get order + conversation + customer + merchant
     const { data: order } = await supabase
       .from('orders')
-      .select('id, reference, total_kobo, customer_id, merchant_id, conversation_id, status')
+      .select('id, reference, total_kobo, customer_id, merchant_id, line_items, status')
       .eq('id', payment.order_id)
       .single()
 
+    // Only act on orders still waiting for payment
     if (!order || order.status !== 'confirmed') continue
 
     const [{ data: merchant }, { data: customer }] = await Promise.all([
@@ -59,49 +62,53 @@ export async function GET(request: NextRequest) {
       supabase.from('customers').select('phone_number').eq('id', order.customer_id).single(),
     ])
 
-    if (!merchant?.telegram_bot_token || !customer?.phone_number) continue
+    // 1. Cancel the order
+    await supabase
+      .from('orders')
+      .update({ status: 'cancelled' })
+      .eq('id', order.id)
 
-    // Generate a new Paystack link with a fresh reference
-    const newRef = `${order.reference}-R${Date.now().toString(36).toUpperCase()}`
-    const syntheticEmail = `${order.customer_id}@telegram.lameda.bot`
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://lameda.vercel.app'
-    const newExpiry = new Date(Date.now() + 30 * 60 * 1000).toISOString()
-
-    const paystackResult = await initializeTransaction({
-      amountKobo: order.total_kobo,
-      email: syntheticEmail,
-      reference: newRef,
-      callbackUrl: `${appUrl}/payment/callback`,
-      metadata: { order_id: order.id, reissued: true },
-    })
-
-    if (!paystackResult) continue
-
-    // Update payment record with new link
+    // 2. Mark payment as failed (link expired without payment)
     await supabase
       .from('payments')
-      .update({
-        paystack_reference: newRef,
-        paystack_access_code: paystackResult.access_code,
-        expires_at: newExpiry,
-        metadata: { ...(payment.metadata as object), reissued: true },
-      })
+      .update({ status: 'failed' })
       .eq('id', payment.id)
 
-    // Notify customer
-    const msg =
-      `⏰ Your previous payment link expired.\n\n` +
-      `Here's a fresh one for your order *${order.reference}*:\n` +
-      `Total: *${formatNaira(order.total_kobo)}*\n\n` +
-      `💳 *Pay here:*\n${paystackResult.authorization_url}\n\n` +
-      `_This link is valid for 30 minutes._`
+    // 3. Restore stock for each line item
+    const lineItems = (order.line_items ?? []) as unknown as CartItem[]
+    for (const item of lineItems) {
+      if (!item.productId || !item.quantity) continue
 
-    await sendTextMessage(merchant.telegram_bot_token, customer.phone_number, msg)
+      const { data: product } = await supabase
+        .from('products')
+        .select('stock_count')
+        .eq('id', item.productId)
+        .single()
 
-    logger.info({ orderId: order.id, newRef }, 'Payment link reissued')
-    reissued++
+      // null stock_count = unlimited — no adjustment needed
+      if (product && product.stock_count !== null) {
+        await supabase
+          .from('products')
+          .update({ stock_count: product.stock_count + item.quantity })
+          .eq('id', item.productId)
+      }
+    }
+
+    // 4. Notify customer
+    if (merchant?.telegram_bot_token && customer?.phone_number) {
+      const msg =
+        `❌ *Order Cancelled — ${order.reference}*\n\n` +
+        `Your payment link expired before payment was completed.\n\n` +
+        `Total was: *${formatNaira(order.total_kobo)}*\n\n` +
+        `If you'd still like to order, simply browse our products and checkout again. 🛍`
+
+      await sendTextMessage(merchant.telegram_bot_token, customer.phone_number, msg)
+    }
+
+    logger.info({ orderId: order.id, ref: order.reference }, 'Order cancelled — payment link expired')
+    cancelled++
   }
 
-  logger.info({ reissued, checked: expiredPayments.length }, 'Payment expiry cron complete')
-  return NextResponse.json({ ok: true, reissued, checked: expiredPayments.length })
+  logger.info({ cancelled, checked: expiredPayments.length }, 'Payment expiry cron complete')
+  return NextResponse.json({ ok: true, cancelled, checked: expiredPayments.length })
 }

@@ -1,4 +1,4 @@
-import { sendListMessage, sendButtonsMessage } from '@/lib/telegram/client'
+import { sendTextMessage, sendListMessage, sendButtonsMessage } from '@/lib/telegram/client'
 import { searchProducts, getProductCategories } from '@/lib/products/search'
 import { formatNaira } from '@/lib/ai/respond'
 import type { ConversationContext, HandlerResult } from '../types'
@@ -57,6 +57,25 @@ export async function handleBrowse(ctx: ConversationContext): Promise<HandlerRes
   }
 
   return showProductResults(ctx, query, filters)
+}
+
+/**
+ * "Search Everything" handler — prompts the user to type a search term.
+ * Sets phase to browsing so the next typed message runs a product search.
+ */
+export async function handleSearchEverythingPrompt(ctx: ConversationContext): Promise<HandlerResult> {
+  const msg =
+    `🔍 What are you looking for?\n\n` +
+    `Type a product name, keyword, or description and I'll find it for you.\n` +
+    `_e.g. "red ankara gown", "size 12 blazer", "children sneakers"_`
+
+  await sendTextMessage(ctx.botToken, ctx.chatId, msg)
+
+  return {
+    newState: { ...ctx.state, phase: 'browsing' },
+    newCart: ctx.cart,
+    replySent: msg,
+  }
 }
 
 /**
