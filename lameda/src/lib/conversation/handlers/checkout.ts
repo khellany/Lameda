@@ -202,6 +202,7 @@ export async function handleAddressReceived(ctx: ConversationContext): Promise<H
 
   await sendButtonsMessage(ctx.botToken, ctx.chatId, summary, [
     { id: 'confirm_order', title: '✅ Confirm Order' },
+    { id: 'change_address', title: '✏️ Change Address' },
     { id: 'cancel_order', title: '❌ Cancel' },
   ])
 
@@ -258,6 +259,7 @@ export async function handleLogisticsSelected(
 
   await sendButtonsMessage(ctx.botToken, ctx.chatId, summary, [
     { id: 'confirm_order', title: '✅ Confirm Order' },
+    { id: 'change_address', title: '✏️ Change Address' },
     { id: 'cancel_order', title: '❌ Cancel' },
   ])
 
@@ -431,6 +433,12 @@ export async function handleConfirmOrder(ctx: ConversationContext): Promise<Hand
 
     await sendTextMessage(ctx.botToken, ctx.chatId, confirmMsg)
 
+    // Allow address correction before payment is made
+    const addressHintMsg = `_Need to change your delivery address? Tap below before paying._`
+    await sendButtonsMessage(ctx.botToken, ctx.chatId, addressHintMsg, [
+      { id: 'change_address_after_confirm', title: '✏️ Change Address' },
+    ])
+
     // Phase moves to payment_pending — the Paystack webhook will send
     // the "Is there anything else?" follow-up after payment is confirmed.
     logger.info({ orderId: order.id, ref: order.reference, merchantId: ctx.merchantId }, 'Order confirmed — awaiting payment')
@@ -453,6 +461,90 @@ export async function handleConfirmOrder(ctx: ConversationContext): Promise<Hand
     await sendTextMessage(ctx.botToken, ctx.chatId, errMsg)
     return { newState: ctx.state, newCart: ctx.cart, replySent: errMsg }
   }
+}
+
+// ----------------------------------------------------------------
+// Address change — before confirming (order summary stage)
+// ----------------------------------------------------------------
+
+export async function handleChangeAddress(ctx: ConversationContext): Promise<HandlerResult> {
+  const msg =
+    `📍 Please send your updated delivery address.\n\n` +
+    `Format: house number, street, area, city, and state.\n` +
+    `_Example: 12 Adeniyi Jones, Ikeja, Lagos_`
+  await sendTextMessage(ctx.botToken, ctx.chatId, msg)
+  return {
+    newState: {
+      ...ctx.state,
+      phase: 'collecting_address',
+      pendingAddress: undefined, // Clear previous address so the new one is used
+    },
+    newCart: ctx.cart,
+    replySent: msg,
+  }
+}
+
+// ----------------------------------------------------------------
+// Address change — after confirming (payment_pending stage)
+// Cancels the existing order, restores cart items, restarts address collection.
+// ----------------------------------------------------------------
+
+export async function handleChangeAddressAfterConfirm(ctx: ConversationContext): Promise<HandlerResult> {
+  const orderId = ctx.state.activeOrderId
+
+  if (!orderId) {
+    // No active order to cancel — just go back to address collection
+    return handleChangeAddress(ctx)
+  }
+
+  const supabase = createAdminClient()
+
+  const { data: order } = await supabase
+    .from('orders')
+    .select('id, line_items, status')
+    .eq('id', orderId)
+    .single()
+
+  if (order?.status === 'confirmed') {
+    await supabase.from('orders').update({ status: 'cancelled' }).eq('id', orderId)
+    await supabase.from('payments').update({ status: 'failed' }).eq('order_id', orderId)
+
+    // Restore cart items from the cancelled order so the customer doesn't re-shop
+    const lineItems = (order.line_items ?? []) as unknown as import('../types').CartItem[]
+    const restoredCart = {
+      items: lineItems,
+      totalKobo: lineItems.reduce((sum, i) => sum + i.priceKobo * i.quantity, 0),
+    }
+
+    const msg =
+      `✏️ Got it! Your order has been cancelled.\n\n` +
+      `Your items are still in your cart. Please send your correct delivery address:\n\n` +
+      `Format: house number, street, area, city, and state.\n` +
+      `_Example: 12 Adeniyi Jones, Ikeja, Lagos_`
+
+    await sendTextMessage(ctx.botToken, ctx.chatId, msg)
+
+    return {
+      newState: {
+        ...ctx.state,
+        phase: 'collecting_address',
+        activeOrderId: undefined,
+        pendingAddress: undefined,
+        pendingDeliveryMethod: 'delivery',
+      },
+      newCart: restoredCart,
+      replySent: msg,
+    }
+  }
+
+  // Order already paid or in a state that can't be changed — explain and offer support
+  const msg =
+    `⚠️ Your order has already been processed and can't be changed here.\n\n` +
+    `Please contact us directly with your order reference to update your address.`
+  await sendButtonsMessage(ctx.botToken, ctx.chatId, msg, [
+    { id: 'support', title: '💬 Contact Support' },
+  ])
+  return { newState: ctx.state, newCart: ctx.cart, replySent: msg }
 }
 
 export async function handleCancelOrder(ctx: ConversationContext): Promise<HandlerResult> {

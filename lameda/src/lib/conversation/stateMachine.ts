@@ -19,6 +19,8 @@ import {
   handleLogisticsSelected,
   handleConfirmOrder,
   handleCancelOrder,
+  handleChangeAddress,
+  handleChangeAddressAfterConfirm,
 } from './handlers/checkout'
 import { handleOrderStatus } from './handlers/orders'
 import { handleComplaintStart, handleComplaintCategory } from './handlers/complaint'
@@ -160,6 +162,14 @@ export async function runStateMachine(
     }
 
     return handleQuantitySelected(ctx, state.activeProductId, qty)
+  }
+
+  // While awaiting payment, detect address-change requests by natural language
+  if (state.phase === 'payment_pending') {
+    const changeAddressPattern = /change.*(address|delivery)|wrong.*address|incorrect.*address|update.*(address|delivery)|address.*wrong|mistake.*address|i.*wrong.*address|different.*address/i
+    if (changeAddressPattern.test(message)) {
+      return handleChangeAddressAfterConfirm(ctx)
+    }
   }
 
   // Typed text while awaiting logistics choice — re-prompt (buttons only)
@@ -332,6 +342,10 @@ function routeButtonPayload(payload: string, ctx: ConversationContext): Promise<
   // Delivery method
   if (payload === 'delivery_choice_delivery') return handleDeliveryChosen(ctx)
   if (payload === 'delivery_choice_pickup')   return handlePickupChosen(ctx)
+
+  // Address change — pre-confirmation (from order summary) and post-confirmation (payment_pending)
+  if (payload === 'change_address')              return handleChangeAddress(ctx)
+  if (payload === 'change_address_after_confirm') return handleChangeAddressAfterConfirm(ctx)
 
   // Logistics method (outside Lagos)
   if (payload === 'logistics_gig')          return handleLogisticsSelected(ctx, 'gig')
