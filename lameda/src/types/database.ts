@@ -342,6 +342,31 @@ export interface Database {
         Relationships: []
       }
 
+      product_embeddings: {
+        Row: {
+          id: string
+          product_id: string
+          merchant_id: string
+          text_content: string
+          embedding: number[]
+          model_version: string
+          created_at: string
+        }
+        Insert: {
+          product_id: string
+          merchant_id: string
+          text_content: string
+          embedding: number[]
+          model_version?: string
+        }
+        Update: {
+          text_content?: string
+          embedding?: number[]
+          model_version?: string
+        }
+        Relationships: []
+      }
+
       audit_logs: {
         Row: {
           id: string
@@ -370,6 +395,26 @@ export interface Database {
       }
     }
     Views: Record<string, never>
-    Functions: Record<string, never>
+    Functions: {
+      search_products_by_embedding: {
+        Args: {
+          p_merchant_id: string
+          p_embedding: number[]
+          p_threshold?: number
+          p_limit?: number
+        }
+        Returns: Array<{
+          id: string
+          name: string
+          description: string | null
+          price_kobo: number
+          category: string | null
+          sizes: string[]
+          colors: string[]
+          image_url: string | null
+          similarity: number
+        }>
+      }
+    }
   }
 }
