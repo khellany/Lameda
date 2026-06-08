@@ -257,9 +257,13 @@ function inferFromContext(message: string, state: ConversationState): Intent | n
   const lower = message.toLowerCase().trim()
 
   switch (state.phase) {
-    case 'browsing':
     case 'greeting':
-      // Any freeform text while browsing = product search
+      // In the initial greeting phase, any unclassified text should restart the greeting
+      // rather than be treated as a product search. The user hasn't chosen a path yet.
+      return 'greeting'
+
+    case 'browsing':
+      // Any freeform text while actively browsing = product search
       if (message.trim().length >= 2) return 'browse_products'
       break
 

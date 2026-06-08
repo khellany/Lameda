@@ -118,6 +118,23 @@ function fallbackIntent(raw: string): ClassifiedIntent {
 export async function classifyIntent(message: string, merchantContext?: string): Promise<ClassifiedIntent> {
   // Short-circuit obvious cases locally to save API cost
   const trimmed = message.trim()
+  const lower = trimmed.toLowerCase()
+
+  // Greetings — detect BEFORE the length guard so "Hi" (2 chars) isn't discarded
+  if (
+    ['/start', 'hi', 'hey', 'yo', 'hiya'].includes(lower) ||
+    ['hello', 'hi ', 'hey ', 'good morning', 'good afternoon', 'good evening', 'morning', 'evening'].some(g => lower.startsWith(g))
+  ) {
+    return { intent: 'greeting', confidence: 'high', entities: {}, raw: trimmed }
+  }
+
+  // Social acknowledgements — detect before length guard
+  const socialExact = ['ok', 'ok!', 'okay', 'okay!', 'thanks', 'thank you', 'thank u', 'noted', 'got it', 'sure', 'cool', 'great', 'nice', 'alright', 'received']
+  if (socialExact.includes(lower)) {
+    return { intent: 'social_phrase', confidence: 'high', entities: {}, raw: trimmed }
+  }
+
+  // After greeting/social checks, skip the AI call for very short messages
   if (trimmed.length < 3) return { intent: 'unknown', confidence: 'low', entities: {}, raw: trimmed }
   if (trimmed === '/start') return { intent: 'greeting', confidence: 'high', entities: {}, raw: trimmed }
 

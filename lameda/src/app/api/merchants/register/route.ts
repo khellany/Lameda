@@ -83,7 +83,11 @@ export async function POST(request: NextRequest) {
 
   if (insertError || !merchant) {
     logger.error({ err: insertError }, 'Merchant insert failed')
-    return NextResponse.json({ error: 'Registration failed. Please try again.' }, { status: 500 })
+    // Temporary: expose DB error for debugging (remove after diagnosis)
+    return NextResponse.json({
+      error: 'Registration failed. Please try again.',
+      _debug: { code: insertError?.code, message: insertError?.message, details: insertError?.details, hint: insertError?.hint },
+    }, { status: 500 })
   }
 
   // Register Telegram webhook using the PLAINTEXT token (before it leaves this scope).
