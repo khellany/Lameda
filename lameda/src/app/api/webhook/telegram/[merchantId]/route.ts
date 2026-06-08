@@ -69,7 +69,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     .from('webhook_events')
     .select('id')
     .eq('external_id', externalId)
-    .eq('source', 'termii') // reusing 'termii' slot for now - Sprint 2 adds 'telegram' enum value
+    .eq('source', 'telegram')
     .maybeSingle()
 
   if (existing) {
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   const { data: webhookEvent } = await supabase
     .from('webhook_events')
     .insert({
-      source: 'termii', // TECHNICAL DEBT: 'telegram' enum value added in Migration 003
+      source: 'telegram', // enum value added in Migration 007
       event_type: update.callback_query ? 'callback_query' : 'message',
       external_id: externalId,
       status: 'received',

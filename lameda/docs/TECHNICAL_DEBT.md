@@ -112,7 +112,18 @@ Format: **[TD-NNN]** - short title, file reference, why accepted, fix trigger.
 
 ## Resolved Items
 
-_(None yet - this project was started June 2026)_
+### ~~TD-003: Webhook state machine is stubbed~~ — Resolved Sprint 2
+- Full state machine implemented in `src/lib/conversation/stateMachine.ts`.
+
+### ~~TD-007: Product embeddings not yet implemented~~ — Resolved Sprint 3
+- `src/lib/ai/embed.ts`, `src/app/api/products/embed-all/route.ts`, migration 004.
+
+### ~~TD-009: No abandoned cart recovery job~~ — Resolved Sprint 2/3
+- Cron job implemented at `src/app/api/cron/cart-recovery/route.ts`.
+
+### TD-011: Telegram webhook used 'termii' enum value — Resolved Sprint 3 wrap-up
+- **File:** `src/app/api/webhook/telegram/[merchantId]/route.ts`
+- **Fix:** Migration 007 adds `'telegram'` to `webhook_source` enum. Route updated.
 
 ---
 
@@ -121,6 +132,8 @@ _(None yet - this project was started June 2026)_
 | Sprint | Open Items | Resolved | Score |
 |--------|-----------|----------|-------|
 | Sprint 1 | 10 | 0 | 10 |
+| Sprint 2 | 8  | 2 | 10 |
+| Sprint 3 | 7  | 4 | 10 |
 
 Target: No P0 debt items open at any time. P1 items must have a fix-trigger milestone assigned.
 
