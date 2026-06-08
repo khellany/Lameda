@@ -111,6 +111,17 @@ export async function runStateMachine(
     }
 
     const ctx = buildCtx({ message, mediaUrl, state, cart, merchantId, customerId, conversationId, botToken, chatId, merchantConfig })
+
+    // hasCart: false — intercept cart-related buttons before they reach handlers.
+    // Route to product detail (which will show "Enquire Now" instead of "Add to Cart").
+    if (merchantConfig && !merchantConfig.hasCart) {
+      const noCartPayloads = new Set(['view_cart', 'clear_cart', 'checkout', 'confirm_order', 'cancel_order'])
+      if (noCartPayloads.has(buttonPayload) || buttonPayload.startsWith('add_to_cart_')) {
+        ctx.intent = { intent: 'product_inquiry', confidence: 'high', entities: { productQuery: buttonPayload }, raw: buttonPayload }
+        return handleProductDetail(ctx)
+      }
+    }
+
     return routeButtonPayload(buttonPayload, ctx)
   }
 
@@ -415,6 +426,18 @@ function routeButtonPayload(payload: string, ctx: ConversationContext): Promise<
 // Intent router
 // ----------------------------------------------------------------
 function routeByIntent(intent: Intent, ctx: ConversationContext): Promise<HandlerResult> {
+  const config = ctx.merchantConfig
+
+  // hasCart: false — redirect all cart/checkout intents to product inquiry.
+  // Services businesses use "Enquire Now" as their conversion CTA.
+  // The product detail handler already shows the right button for no-cart mode.
+  if (config && !config.hasCart) {
+    if (intent === 'add_to_cart' || intent === 'checkout' || intent === 'view_cart' || intent === 'remove_from_cart') {
+      ctx.intent = { ...ctx.intent, intent: 'product_inquiry' }
+      return handleProductDetail(ctx)
+    }
+  }
+
   switch (intent) {
     case 'greeting':        return handleGreeting(ctx)
     case 'social_phrase':   return handleSocialPhrase(ctx)

@@ -5,7 +5,11 @@ import type { ConversationContext, HandlerResult, CartItem, ProductSummary } fro
 
 /**
  * Product detail handler.
- * Shows product image (if available) + description + Add to Cart button.
+ * Shows product image (if available) + description + primary CTA.
+ *
+ * Business-type-aware (STORY-022):
+ *   hasCart: true  → "Add to Cart" CTA (fashion, food, electronics, beauty, general)
+ *   hasCart: false → "Enquire Now" CTA routed to support/handoff (services)
  */
 export async function handleProductDetail(ctx: ConversationContext): Promise<HandlerResult> {
   const productId = extractProductId(ctx)
@@ -28,12 +32,21 @@ export async function handleProductDetail(ctx: ConversationContext): Promise<Han
     ? await generateProductDescription(product, ctx.rawMessage)
     : buildFallbackDescription(product)
 
-  const buttons = [
-    { id: `add_to_cart_${product.id}`, title: '🛒 Add to Cart' },
-    { id: 'browse_all', title: '← Back to Products' },
-  ]
+  const hasCart = ctx.merchantConfig?.hasCart !== false
+  const catalogLabel = ctx.merchantConfig?.catalogLabel ?? 'catalog'
+  const catalogTitle = catalogLabel.charAt(0).toUpperCase() + catalogLabel.slice(1)
 
-  // Show image when available — visually essential for fashion
+  const buttons = hasCart
+    ? [
+        { id: `add_to_cart_${product.id}`, title: '🛒 Add to Cart' },
+        { id: 'browse_all', title: `← Back to ${catalogTitle}` },
+      ]
+    : [
+        // Services: CTA opens the support/complaint flow where a human or AI can follow up
+        { id: 'support', title: '📞 Enquire Now' },
+        { id: 'browse_all', title: `← Back to ${catalogTitle}` },
+      ]
+
   if (product.imageUrl) {
     await sendPhotoMessage(ctx.botToken, ctx.chatId, product.imageUrl, description, buttons)
   } else {
@@ -95,14 +108,19 @@ export async function handleQuantitySelected(
     return { newState: { ...ctx.state, phase: 'browsing' }, newCart: ctx.cart, replySent: msg }
   }
 
+  const stateWithQty = { ...ctx.state, pendingQuantity: quantity }
+
+  // hasVariants: false means this business type never uses size/color selection
+  // (e.g. food, services). Skip directly to cart even if product has variant data.
+  if (ctx.merchantConfig?.hasVariants === false) {
+    return addToCartFinal({ ...ctx, state: stateWithQty }, product.id, product.name, product.priceKobo, product.imageUrl, undefined, undefined)
+  }
+
   // Use variant stock data if available, otherwise fall back to product arrays
   const variants = await getAvailableVariants(productId)
   const hasVariantData = variants.sizes.length > 0 || variants.colors.length > 0
   const sizes = hasVariantData ? variants.sizes : product.sizes
   const colors = hasVariantData ? variants.colors : product.colors
-
-  // Store quantity in state, then route to size/color/cart
-  const stateWithQty = { ...ctx.state, pendingQuantity: quantity }
 
   if (sizes.length > 0) {
     return showSizeSelection({ ...ctx, state: stateWithQty }, product.id, product.name, sizes)

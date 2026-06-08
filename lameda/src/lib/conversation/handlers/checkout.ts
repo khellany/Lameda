@@ -20,15 +20,17 @@ import type { ConversationContext, HandlerResult } from '../types'
 // ----------------------------------------------------------------
 
 export async function handleCheckoutStart(ctx: ConversationContext): Promise<HandlerResult> {
+  const config = ctx.merchantConfig
+  const catalogLabel = config?.catalogLabel ?? 'products'
+
   if (ctx.cart.items.length === 0) {
-    const msg = `Your cart is empty! Add some items before checking out. 🛍`
+    const msg = `Your cart is empty! Browse our ${catalogLabel} and add something first. 🛍`
     await sendButtonsMessage(ctx.botToken, ctx.chatId, msg, [
-      { id: 'browse_all', title: '🛍 Browse Products' },
+      { id: 'browse_all', title: `🛍 Browse ${catalogLabel.charAt(0).toUpperCase() + catalogLabel.slice(1)}` },
     ])
     return { newState: { ...ctx.state, phase: 'browsing' }, newCart: ctx.cart, replySent: msg }
   }
 
-  // Check if merchant has a pickup address configured
   const supabase = createAdminClient()
   const { data: merchant } = await supabase
     .from('merchants')
@@ -36,12 +38,19 @@ export async function handleCheckoutStart(ctx: ConversationContext): Promise<Han
     .eq('id', ctx.merchantId)
     .single()
 
-  const hasPickup = !!merchant?.pickup_address
+  // Config takes precedence: hasDelivery: false forces pickup-only regardless of pickup_address
+  const configAllowsDelivery = config?.hasDelivery !== false
+  const configAllowsPickup = config?.hasPickup !== false
+  const hasPickupAddress = !!merchant?.pickup_address
 
-  // Delivery-only: confirm delivery is selected and immediately ask for address.
-  // Going straight to collecting_address ensures pendingDeliveryMethod is set
-  // before handleAddressReceived runs, preventing the delivery-method-missing bug.
-  if (!hasPickup) {
+  // Delivery-only path: no pickup address configured, or config explicitly disables pickup
+  if (!hasPickupAddress || !configAllowsPickup) {
+    if (!configAllowsDelivery) {
+      // Edge case: neither delivery nor pickup — shouldn't happen but handle gracefully
+      const msg = `Please contact us to arrange collection. 😊`
+      await sendTextMessage(ctx.botToken, ctx.chatId, msg)
+      return { newState: ctx.state, newCart: ctx.cart, replySent: msg }
+    }
     const deliveryMsg =
       `🏍 *Delivery selected.*\n\n` +
       `📍 Please send your delivery address.\n\n` +
@@ -55,6 +64,12 @@ export async function handleCheckoutStart(ctx: ConversationContext): Promise<Han
     }
   }
 
+  // Pickup-only path: config disables delivery
+  if (!configAllowsDelivery) {
+    return handlePickupChosen(ctx)
+  }
+
+  // Both available — let customer choose
   const msg = `📦 How would you like to receive your order?`
   await sendButtonsMessage(ctx.botToken, ctx.chatId, msg, [
     { id: 'delivery_choice_delivery', title: '🏍 Delivery' },
