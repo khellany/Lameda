@@ -78,16 +78,21 @@ export async function runStateMachine(
       answerCallbackQuery(botToken, callbackQueryId).catch(() => {})
     }
 
-    // If the session has ended, intercept ALL button presses from the old session.
-    // Show a popup alert and invite the customer to start fresh.
-    if (state.phase === 'completed') {
+    // After an order is completed, only three buttons are valid:
+    //   browse_all / browse_all_products → start a new shopping session
+    //   session_done                     → close the session gracefully
+    //   order_status                     → check on the order just placed
+    // Everything else is an old button from earlier in the conversation —
+    // block it with an alert and invite the customer to start fresh.
+    const POST_ORDER_ALLOWED = new Set(['browse_all', 'browse_all_products', 'session_done', 'order_status'])
+
+    if (state.phase === 'completed' && !POST_ORDER_ALLOWED.has(buttonPayload)) {
       if (callbackQueryId) {
-        // Override the silent answer above with an alert popup
         await answerCallbackQuery(
           botToken,
           callbackQueryId,
-          'This session has ended. Type "Hi" to start a new order! 🛍',
-          true, // show_alert = modal popup, not just a toast
+          'That option is no longer active. Tap "Shop Now" to start a new order! 🛍',
+          true,
         )
       }
       const restartMsg = `👋 Your previous session has ended.\n\nTap below or type *Hi* to start a new order:`
@@ -117,10 +122,44 @@ export async function runStateMachine(
 
   // Typed quantity during selecting_quantity phase
   if (state.phase === 'selecting_quantity' && state.activeProductId) {
-    const qty = parseInt(ctx.rawMessage.trim(), 10)
-    if (!isNaN(qty) && qty > 0) {
-      return handleQuantitySelected(ctx, state.activeProductId, Math.min(qty, 10))
+    const raw = ctx.rawMessage.trim()
+    const qty = parseInt(raw, 10)
+
+    if (isNaN(qty) || raw === '') {
+      const msg = `Please tap one of the buttons or type a number — e.g. *1*, *2*, *5* 😊`
+      await sendButtons(botToken, chatId, msg, [
+        { id: `qty_${state.activeProductId}_1`, title: '1' },
+        { id: `qty_${state.activeProductId}_2`, title: '2' },
+        { id: `qty_${state.activeProductId}_3`, title: '3' },
+        { id: `qty_${state.activeProductId}_4`, title: '4' },
+        { id: `qty_${state.activeProductId}_5`, title: '5' },
+      ])
+      return { newState: state, newCart: cart, replySent: msg }
     }
+
+    if (qty <= 0) {
+      const msg = `Quantity must be at least 1. How many would you like? 😊`
+      await sendButtons(botToken, chatId, msg, [
+        { id: `qty_${state.activeProductId}_1`, title: '1' },
+        { id: `qty_${state.activeProductId}_2`, title: '2' },
+        { id: `qty_${state.activeProductId}_3`, title: '3' },
+        { id: `qty_${state.activeProductId}_4`, title: '4' },
+        { id: `qty_${state.activeProductId}_5`, title: '5' },
+      ])
+      return { newState: state, newCart: cart, replySent: msg }
+    }
+
+    const MAX_QTY = 10
+    if (qty > MAX_QTY) {
+      // Cap and inform — don't silently discard
+      const msg = `The maximum per order is *${MAX_QTY}*. We'll add ${MAX_QTY} for you. ✅`
+      await sendButtons(botToken, chatId, msg, [
+        { id: `qty_${state.activeProductId}_${MAX_QTY}`, title: `Add ${MAX_QTY}` },
+      ])
+      return handleQuantitySelected(ctx, state.activeProductId, MAX_QTY)
+    }
+
+    return handleQuantitySelected(ctx, state.activeProductId, qty)
   }
 
   // Typed text while awaiting logistics choice — re-prompt (buttons only)

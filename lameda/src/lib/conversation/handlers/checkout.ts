@@ -38,9 +38,17 @@ export async function handleCheckoutStart(ctx: ConversationContext): Promise<Han
 
   const hasPickup = !!merchant?.pickup_address
 
-  // If only delivery is available, skip the choice step and ask for address directly
+  // If only delivery is available, confirm the method to the customer before asking for address
   if (!hasPickup) {
-    return handleDeliveryChosen(ctx)
+    const deliveryMsg = `📦 Your order will be delivered to you.\n\nPlease send your delivery address to continue.`
+    await sendButtonsMessage(ctx.botToken, ctx.chatId, deliveryMsg, [
+      { id: 'delivery_choice_delivery', title: '📍 Enter Address' },
+    ])
+    return {
+      newState: { ...ctx.state, phase: 'selecting_delivery' },
+      newCart: ctx.cart,
+      replySent: deliveryMsg,
+    }
   }
 
   const msg = `📦 How would you like to receive your order?`
@@ -130,8 +138,18 @@ export async function handleAddressReceived(ctx: ConversationContext): Promise<H
   if (!validation.ok) {
     const msg =
       `⚠️ That address looks incomplete.\n\n` +
-      `Please include street, area, and city.\n` +
+      `Please include your house number, street, area, city, and state.\n` +
       `_Example: 12 Adeniyi Jones, Ikeja, Lagos_`
+    await sendTextMessage(ctx.botToken, ctx.chatId, msg)
+    return { newState: ctx.state, newCart: ctx.cart, replySent: msg }
+  }
+
+  // Reject addresses with no recognizable Nigerian location
+  if (!isNigerianAddress(address)) {
+    const msg =
+      `⚠️ We couldn't find a Nigerian city or state in that address.\n\n` +
+      `Please include your city and state — e.g. *Warri, Delta* or *Lekki, Lagos*.\n` +
+      `_We currently deliver within Nigeria only._`
     await sendTextMessage(ctx.botToken, ctx.chatId, msg)
     return { newState: ctx.state, newCart: ctx.cart, replySent: msg }
   }
@@ -316,6 +334,21 @@ export async function handleConfirmOrder(ctx: ConversationContext): Promise<Hand
       })
     }
 
+    if (!paystackResult) {
+      // Paystack failed — order is created in DB but payment link couldn't be generated.
+      // Keep phase at confirming_order so the customer can retry; don't clear the cart.
+      logger.error({ orderId: order.id, ref: order.reference }, 'Paystack init failed — order held for retry')
+      const retryMsg =
+        `✅ *Order received!* Reference: \`${order.reference}\`\n\n` +
+        `💳 We couldn't generate your payment link right now.\n` +
+        `Please tap *Retry Payment* or contact us with your reference number.`
+      await sendButtonsMessage(ctx.botToken, ctx.chatId, retryMsg, [
+        { id: 'confirm_order', title: '🔄 Retry Payment' },
+        { id: 'cancel_order', title: '❌ Cancel Order' },
+      ])
+      return { newState: ctx.state, newCart: ctx.cart, replySent: retryMsg }
+    }
+
     // Logistics-specific follow-up note (only for outside-Lagos orders)
     const logisticsNote =
       logisticsType === 'park_waybill'
@@ -324,18 +357,13 @@ export async function handleConfirmOrder(ctx: ConversationContext): Promise<Hand
           ? `\n\n🚐 *GIG Logistics:* Your order tracking ID and delivery details will be communicated to you.`
           : ''
 
-    const confirmMsg = paystackResult
-      ? `🎉 *Order Confirmed!*\n\n` +
-        `Reference: \`${order.reference}\`\n` +
-        `Total: *${formatNaira(ctx.cart.totalKobo)}*\n\n` +
-        `💳 *Pay securely here:*\n${paystackResult.authorization_url}\n\n` +
-        `_Link expires in 30 minutes._` +
-        logisticsNote
-      : `🎉 *Order Confirmed!*\n\n` +
-        `Reference: \`${order.reference}\`\n` +
-        `Total: *${formatNaira(ctx.cart.totalKobo)}*\n\n` +
-        `💳 Our team will send your payment link shortly. Thank you! 🙏` +
-        logisticsNote
+    const confirmMsg =
+      `🎉 *Order Confirmed!*\n\n` +
+      `Reference: \`${order.reference}\`\n` +
+      `Total: *${formatNaira(ctx.cart.totalKobo)}*\n\n` +
+      `💳 *Pay securely here:*\n${paystackResult.authorization_url}\n\n` +
+      `_Link expires in 30 minutes._` +
+      logisticsNote
 
     await sendTextMessage(ctx.botToken, ctx.chatId, confirmMsg)
 
@@ -425,37 +453,108 @@ function validateAddress(address: string): { ok: boolean } {
   return { ok: true }
 }
 
-// All 36 Nigerian states + FCT/Abuja, lower-cased for matching.
-// Checked from the end of the address (state appears last) before checking anywhere else.
-const NIGERIAN_STATES = [
-  'abia', 'adamawa', 'akwa ibom', 'anambra', 'bauchi', 'bayelsa', 'benue',
-  'borno', 'cross river', 'delta', 'ebonyi', 'edo', 'ekiti', 'enugu',
-  'fct', 'abuja', 'gombe', 'imo', 'jigawa', 'kaduna', 'kano', 'katsina',
-  'kebbi', 'kogi', 'kwara', 'lagos', 'nasarawa', 'niger', 'ogun', 'ondo',
-  'osun', 'oyo', 'plateau', 'rivers', 'port harcourt', 'sokoto', 'taraba',
-  'yobe', 'zamfara',
-]
+/**
+ * Comprehensive Nigeria location dictionary.
+ * Keys are state names (lower-case). Values are arrays of major cities/LGAs.
+ * Used to: (a) detect state from address, (b) confirm the address is in Nigeria.
+ */
+const NIGERIA_LOCATIONS: Record<string, string[]> = {
+  'lagos': ['ikeja', 'lekki', 'victoria island', 'vi', 'ikoyi', 'surulere', 'yaba', 'mushin', 'oshodi',
+    'agege', 'alimosho', 'badagry', 'epe', 'ibeju-lekki', 'ifako-ijaiye', 'ikorodu', 'kosofe',
+    'lagos island', 'lagos mainland', 'shomolu', 'apapa', 'ajah', 'festac', 'ojo', 'amuwo-odofin',
+    'gbagada', 'magodo', 'ojota', 'anthony', 'maryland', 'berger', 'sangotedo', 'awoyaya'],
+  'abuja': ['garki', 'wuse', 'maitama', 'asokoro', 'gwarinpa', 'kubwa', 'nyanya', 'karu',
+    'lugbe', 'gwagwalada', 'bwari', 'abaji', 'kuje', 'kwali', 'jabi', 'wuye', 'utako'],
+  'fct': ['garki', 'wuse', 'maitama', 'asokoro', 'gwarinpa', 'kubwa', 'nyanya', 'karu', 'lugbe'],
+  'rivers': ['port harcourt', 'bonny', 'obio-akpor', 'okrika', 'eleme', 'oyigbo', 'rumuola',
+    'rumuokoro', 'rumuola', 'rumuigbo', 'diobu', 'trans-amadi', 'mile 1', 'mile 3'],
+  'oyo': ['ibadan', 'ogbomoso', 'oyo', 'iseyin', 'saki', 'eruwa', 'lanlate', 'igboho',
+    'mokola', 'bodija', 'ring road', 'dugbe', 'challenge', 'ojoo', 'gate'],
+  'kano': ['kano city', 'nassarawa', 'ungogo', 'fagge', 'dala', 'gwale', 'kumbotso',
+    'tarauni', 'doguwa', 'bichi', 'gwarzo', 'sumaila', 'dawakin tofa', 'tofa'],
+  'delta': ['warri', 'asaba', 'sapele', 'ughelli', 'agbor', 'ozoro', 'abraka', 'oleh',
+    'kwale', 'burutu', 'bomadi', 'eku', 'effurun', 'uvwie', 'okpe'],
+  'anambra': ['awka', 'onitsha', 'nnewi', 'ekwulobia', 'aguata', 'ihiala', 'ogidi',
+    'obosi', 'nkpor', 'awka-etiti', 'dunukofia'],
+  'edo': ['benin city', 'ekpoma', 'auchi', 'uromi', 'igarra', 'otuo', 'fugar',
+    'ubiaja', 'illushi', 'sabongida-ora', 'etsako'],
+  'enugu': ['enugu', 'nsukka', 'agbani', 'oji river', 'awgu', 'udi', 'ezeagu', 'igbo-eze'],
+  'imo': ['owerri', 'orlu', 'okigwe', 'mbaise', 'mbano', 'onuimo', 'oru east', 'oru west'],
+  'abia': ['umuahia', 'aba', 'arochukwu', 'ohafia', 'bende', 'ikwuano', 'isuikwuato'],
+  'adamawa': ['yola', 'mubi', 'jimeta', 'numan', 'ganye', 'gombi', 'guyuk', 'michika'],
+  'akwa ibom': ['uyo', 'ikot ekpene', 'eket', 'oron', 'abak', 'etinan', 'ikono', 'ini'],
+  'bauchi': ['bauchi', 'azare', 'misau', 'gombe', 'darazo', 'katagum', 'itas-gadau'],
+  'bayelsa': ['yenagoa', 'ogbia', 'brass', 'nembe', 'sagbama', 'ekeremor', 'kolokuma'],
+  'benue': ['makurdi', 'gboko', 'otukpo', 'katsina-ala', 'vandekya', 'oturkpo', 'ogbadibo'],
+  'borno': ['maiduguri', 'biu', 'bama', 'konduga', 'gwoza', 'chibok', 'damboa'],
+  'cross river': ['calabar', 'ogoja', 'ikom', 'obudu', 'akamkpa', 'bekwarra', 'boki'],
+  'ebonyi': ['abakaliki', 'onueke', 'afikpo', 'edda', 'amasiri', 'ivo', 'ikwo'],
+  'ekiti': ['ado ekiti', 'ikere ekiti', 'ijero ekiti', 'efon alaaye', 'omuo ekiti', 'iyin ekiti'],
+  'gombe': ['gombe', 'kaltungo', 'billiri', 'nafada', 'kwami', 'funakaye', 'balanga'],
+  'jigawa': ['dutse', 'hadejia', 'gumel', 'kazaure', 'ringim', 'birnin kudu', 'guri'],
+  'kaduna': ['kaduna', 'zaria', 'kafanchan', 'kagoro', 'lere', 'kachia', 'soba'],
+  'katsina': ['katsina', 'daura', 'funtua', 'malumfashi', 'jibia', 'batsari', 'mashi'],
+  'kebbi': ['birnin kebbi', 'argungu', 'yauri', 'koko-besse', 'jega', 'shanga', 'wasagu'],
+  'kogi': ['lokoja', 'kabba', 'okene', 'ajaokuta', 'idah', 'ankpa', 'bassa'],
+  'kwara': ['ilorin', 'offa', 'omu-aran', 'share', 'kaiama', 'lafiagi', 'patigi'],
+  'nasarawa': ['lafia', 'keffi', 'akwanga', 'nasarawa', 'wamba', 'obi', 'doma'],
+  'niger': ['minna', 'bida', 'suleja', 'kontagora', 'agaie', 'lapai', 'rijau', 'shiroro'],
+  'ogun': ['abeokuta', 'sagamu', 'ijebu ode', 'ilaro', 'shagamu', 'ota', 'igbesa', 'ifo'],
+  'ondo': ['akure', 'ondo', 'owo', 'ikare', 'okitipupa', 'idanre', 'ile-oluji'],
+  'osun': ['osogbo', 'ilesa', 'ife', 'ede', 'iwo', 'inisa', 'ile-ife', 'ejigbo'],
+  'plateau': ['jos', 'bukuru', 'barkin ladi', 'pankshin', 'shendam', 'langtang', 'mangu'],
+  'sokoto': ['sokoto', 'tambuwal', 'gwadabawa', 'wurno', 'isa', 'rabah', 'shagari'],
+  'taraba': ['jalingo', 'wukari', 'bali', 'gashaka', 'sardauna', 'takum', 'ussa'],
+  'yobe': ['damaturu', 'potiskum', 'gashua', 'nguru', 'geidam', 'bade', 'jakusko'],
+  'zamfara': ['gusau', 'kaura namoda', 'talata-mafara', 'bungudu', 'shinkafi', 'zurmi'],
+}
+
+// Flat list of all state names (keys) — used for quick state detection
+const ALL_STATES = Object.keys(NIGERIA_LOCATIONS)
+
+// Reverse map: city → state (built once at module load)
+const CITY_TO_STATE: Record<string, string> = {}
+for (const [state, cities] of Object.entries(NIGERIA_LOCATIONS)) {
+  for (const city of cities) {
+    CITY_TO_STATE[city] = state
+  }
+}
 
 /**
  * Extracts the Nigerian state from an address string.
- * Prioritises the last comma-separated segment (most addresses end with city, State).
- * Falls back to scanning the full address if not found in the tail.
+ * Priority: last comma segment → full address for state names → city names.
+ * Returns null if no Nigerian location is found at all.
  */
 function extractStateFromAddress(address: string): string | null {
   const lower = address.toLowerCase()
   const parts = lower.split(',').map(s => s.trim())
 
-  // Prioritise state: scan from the last segment backwards
+  // 1. Scan comma segments from the tail (state is usually last)
   for (let i = parts.length - 1; i >= 0; i--) {
-    for (const state of NIGERIAN_STATES) {
+    for (const state of ALL_STATES) {
       if (parts[i].includes(state)) return state
     }
   }
-  // Fallback: check full address string
-  for (const state of NIGERIAN_STATES) {
+
+  // 2. Scan full address for state name
+  for (const state of ALL_STATES) {
     if (lower.includes(state)) return state
   }
+
+  // 3. Try to infer state from a recognizable city name
+  for (const [city, state] of Object.entries(CITY_TO_STATE)) {
+    if (lower.includes(city)) return state
+  }
+
   return null
+}
+
+/**
+ * Returns true if the address contains at least one recognizable Nigerian location
+ * (state name or major city). Used to reject addresses that are clearly not in Nigeria.
+ */
+function isNigerianAddress(address: string): boolean {
+  return extractStateFromAddress(address) !== null
 }
 
 function capitaliseFirst(s: string): string {
