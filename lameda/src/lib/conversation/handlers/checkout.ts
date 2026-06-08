@@ -302,7 +302,65 @@ export async function handleConfirmOrder(ctx: ConversationContext): Promise<Hand
 
     if (error || !order) throw new Error(error?.message ?? 'Order insert failed')
 
-    // Generate Paystack payment link
+    const isMockMode = process.env.PAYMENT_MOCK === 'true'
+
+    // ── MOCK PAYMENT MODE ─────────────────────────────────────────
+    // Set PAYMENT_MOCK=true in Vercel env vars to bypass Paystack for
+    // prototype testing. Orders are marked 'paid' immediately.
+    // Remove this env var and add PAYSTACK_SECRET_KEY before go-live.
+    // ─────────────────────────────────────────────────────────────
+    if (isMockMode) {
+      await supabase.from('orders').update({ status: 'paid' }).eq('id', order.id)
+      await supabase.from('payments').insert({
+        order_id: order.id,
+        merchant_id: ctx.merchantId,
+        status: 'success',
+        amount_kobo: ctx.cart.totalKobo,
+        currency: 'NGN',
+        paystack_reference: `MOCK-${ref}`,
+        paystack_access_code: 'mock',
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        metadata: { mock: true },
+      })
+
+      const logisticsNote =
+        logisticsType === 'park_waybill'
+          ? `\n\n📦 *Park Waybill:* A representative will reach out to confirm your delivery details.`
+          : logisticsType === 'gig'
+            ? `\n\n🚐 *GIG Logistics:* Your order tracking ID and delivery details will be communicated to you.`
+            : ''
+
+      const mockMsg =
+        `🎉 *Order Confirmed!* _(Test Mode)_\n\n` +
+        `Reference: \`${order.reference}\`\n` +
+        `Total: *${formatNaira(ctx.cart.totalKobo)}*\n\n` +
+        `🔧 _Payment bypassed for prototype testing. Payment integration will be active at launch._` +
+        logisticsNote
+
+      await sendTextMessage(ctx.botToken, ctx.chatId, mockMsg)
+      const followUpMsg = `Is there anything else you'd like to order? 😊`
+      await sendButtonsMessage(ctx.botToken, ctx.chatId, followUpMsg, [
+        { id: 'browse_all', title: '🛍 Shop More' },
+        { id: 'session_done', title: '✅ That\'s All' },
+      ])
+
+      logger.info({ orderId: order.id, ref: order.reference, mock: true }, 'Order confirmed (mock mode)')
+
+      return {
+        newState: {
+          ...ctx.state,
+          phase: 'completed',
+          activeOrderId: order.id,
+          pendingAddress: undefined,
+          pendingDeliveryMethod: undefined,
+          pendingLogisticsType: undefined,
+        },
+        newCart: { items: [], totalKobo: 0 },
+        replySent: mockMsg,
+      }
+    }
+
+    // ── LIVE PAYMENT MODE ─────────────────────────────────────────
     const syntheticEmail = `${ctx.customerId}@telegram.lameda.bot`
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://lameda.vercel.app'
     const linkExpiry = new Date(Date.now() + 30 * 60 * 1000).toISOString()
