@@ -6,7 +6,6 @@ type BusinessType = 'fashion' | 'food' | 'electronics' | 'beauty' | 'services' |
 
 interface RegisterResult {
   success: true
-  merchant_id: string
   business_name: string
   api_key: string
   bot_name?: string
@@ -14,7 +13,6 @@ interface RegisterResult {
   webhook_registered: boolean
   webhook_error?: string
   next_steps: {
-    import_products: string
     test_bot: string
   }
 }
@@ -140,44 +138,38 @@ export default function OnboardPage() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1 uppercase tracking-wide">
-                Webhook URL
-              </label>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 block bg-zinc-50 text-zinc-700 text-xs rounded-lg px-3 py-2.5 font-mono overflow-x-auto border border-zinc-200">
-                  {result.webhook_url}
-                </code>
-                <button
-                  onClick={() => copyToClipboard(result.webhook_url, 'webhook')}
-                  className="shrink-0 px-3 py-2.5 text-sm bg-zinc-100 hover:bg-zinc-200 rounded-lg transition-colors"
-                >
-                  {copied === 'webhook' ? 'Copied!' : 'Copy'}
-                </button>
+            {/* Only show webhook URL if auto-registration failed — merchant needs it for manual setup */}
+            {!result.webhook_registered && (
+              <div>
+                <label className="block text-xs font-medium text-zinc-500 mb-1 uppercase tracking-wide">
+                  Webhook URL <span className="text-amber-600 font-normal">(set this manually in Telegram)</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 block bg-zinc-50 text-zinc-700 text-xs rounded-lg px-3 py-2.5 font-mono overflow-x-auto border border-zinc-200">
+                    {result.webhook_url}
+                  </code>
+                  <button
+                    onClick={() => copyToClipboard(result.webhook_url, 'webhook')}
+                    className="shrink-0 px-3 py-2.5 text-sm bg-zinc-100 hover:bg-zinc-200 rounded-lg transition-colors"
+                  >
+                    {copied === 'webhook' ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
               </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-zinc-500 mb-1 uppercase tracking-wide">
-                Merchant ID
-              </label>
-              <code className="block bg-zinc-50 text-zinc-600 text-xs rounded-lg px-3 py-2.5 font-mono border border-zinc-200">
-                {result.merchant_id}
-              </code>
-            </div>
+            )}
           </div>
 
           <div className="mt-6 p-4 bg-zinc-50 rounded-xl border border-zinc-100">
             <h2 className="text-sm font-semibold text-zinc-800 mb-3">Next steps</h2>
             <ol className="text-sm text-zinc-600 space-y-2 list-decimal list-inside">
               <li>
-                <strong>Import your products</strong> — upload a CSV via the import endpoint using your API key
+                <strong>Add your products</strong> — import your catalogue using the API key above
               </li>
               <li>
                 <strong>Test your bot</strong> — {result.next_steps.test_bot}
               </li>
               <li>
-                <strong>Share the bot link</strong> — customers can find your bot on Telegram and start ordering
+                <strong>Share with customers</strong> — send them your bot link and start taking orders
               </li>
             </ol>
           </div>

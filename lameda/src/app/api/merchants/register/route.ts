@@ -118,7 +118,6 @@ export async function POST(request: NextRequest) {
     webhook_registered: webhookResult.ok,
     webhook_error: webhookResult.ok ? undefined : webhookResult.description,
     next_steps: {
-      import_products: `POST ${appUrl}/api/products/import with header X-Merchant-Api-Key: ${apiKey}`,
       test_bot: `Open Telegram and message @${botName ?? 'your_bot'} to test`,
     },
   })
