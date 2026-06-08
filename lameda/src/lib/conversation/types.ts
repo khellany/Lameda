@@ -105,6 +105,8 @@ export interface ProductSummary {
   colors: string[]
   imageUrl: string | null
   category: string | null
+  /** null = unlimited stock; 0 = out of stock; >0 = units available */
+  stockCount: number | null
 }
 
 // ----------------------------------------------------------------

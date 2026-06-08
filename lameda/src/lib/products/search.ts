@@ -83,7 +83,7 @@ export async function getProductById(
 
   const { data, error } = await supabase
     .from('products')
-    .select('id, name, description, price_kobo, sizes, colors, image_url, category')
+    .select('id, name, description, price_kobo, sizes, colors, image_url, category, stock_count')
     .eq('id', productId)
     .eq('merchant_id', merchantId)
     .eq('is_active', true)
@@ -128,6 +128,7 @@ async function vectorSearch(
     colors: row.colors ?? [],
     imageUrl: row.image_url,
     category: row.category,
+    stockCount: null, // RPC result doesn't include stock_count — fetched on product detail
   }))
 }
 
@@ -144,7 +145,7 @@ async function trigramSearch(
 
   let dbQuery = supabase
     .from('products')
-    .select('id, name, description, price_kobo, sizes, colors, image_url, category')
+    .select('id, name, description, price_kobo, sizes, colors, image_url, category, stock_count')
     .eq('merchant_id', merchantId)
     .eq('is_active', true)
 
@@ -180,7 +181,7 @@ async function fetchAllProducts(
 
   let dbQuery = supabase
     .from('products')
-    .select('id, name, description, price_kobo, sizes, colors, image_url, category')
+    .select('id, name, description, price_kobo, sizes, colors, image_url, category, stock_count')
     .eq('merchant_id', merchantId)
     .eq('is_active', true)
 
@@ -224,6 +225,7 @@ function mapProduct(row: {
   colors: string[] | null
   image_url: string | null
   category: string | null
+  stock_count?: number | null
 }): ProductSummary {
   return {
     id: row.id,
@@ -234,5 +236,6 @@ function mapProduct(row: {
     colors: row.colors ?? [],
     imageUrl: row.image_url,
     category: row.category,
+    stockCount: row.stock_count ?? null,
   }
 }

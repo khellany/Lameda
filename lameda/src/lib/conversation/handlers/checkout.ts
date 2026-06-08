@@ -1,6 +1,7 @@
 import { sendTextMessage, sendButtonsMessage } from '@/lib/telegram/client'
 import { createAdminClient } from '@/lib/supabase/server'
 import { formatNaira } from '@/lib/ai/respond'
+import { initializeTransaction } from '@/lib/payments/paystack'
 import { logger } from '@/lib/utils/logger'
 import type { ConversationContext, HandlerResult } from '../types'
 
@@ -97,17 +98,55 @@ export async function handleConfirmOrder(ctx: ConversationContext): Promise<Hand
       throw new Error(error?.message ?? 'Order insert failed')
     }
 
-    // TODO (Sprint 3): Generate Paystack payment link here
-    const confirmMsg =
-      `🎉 *Order Confirmed!*\n\n` +
-      `Reference: \`${order.reference}\`\n` +
-      `Total: *${formatNaira(ctx.cart.totalKobo)}*\n\n` +
-      `💳 Payment link coming shortly! Our team will send it to you soon.\n\n` +
-      `Thank you for shopping with us! 🙏`
+    // Generate Paystack payment link
+    // Telegram chat ID is stored in phone_number — use as synthetic email
+    const syntheticEmail = `${ctx.customerId}@telegram.lameda.bot`
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://lameda.vercel.app'
+
+    const paystackResult = await initializeTransaction({
+      amountKobo: ctx.cart.totalKobo,
+      email: syntheticEmail,
+      reference: ref,
+      callbackUrl: `${appUrl}/payment/callback`,
+      metadata: {
+        order_id: order.id,
+        customer_id: ctx.customerId,
+        merchant_id: ctx.merchantId,
+        conversation_id: ctx.conversationId,
+      },
+    })
+
+    // Create payment record
+    if (paystackResult) {
+      await supabase.from('payments').insert({
+        order_id: order.id,
+        merchant_id: ctx.merchantId,
+        status: 'pending',
+        amount_kobo: ctx.cart.totalKobo,
+        currency: 'NGN',
+        paystack_reference: paystackResult.reference,
+        paystack_access_code: paystackResult.access_code,
+        metadata: { synthetic_email: syntheticEmail },
+      })
+    }
+
+    const confirmMsg = paystackResult
+      ? `🎉 *Order Confirmed!*\n\n` +
+        `Reference: \`${order.reference}\`\n` +
+        `Total: *${formatNaira(ctx.cart.totalKobo)}*\n\n` +
+        `💳 *Pay securely here:*\n${paystackResult.authorization_url}\n\n` +
+        `_Link expires in 30 minutes. Your order is reserved while you pay._`
+      : `🎉 *Order Confirmed!*\n\n` +
+        `Reference: \`${order.reference}\`\n` +
+        `Total: *${formatNaira(ctx.cart.totalKobo)}*\n\n` +
+        `💳 Our team will send your payment link shortly. Thank you! 🙏`
 
     await sendTextMessage(ctx.botToken, ctx.chatId, confirmMsg)
 
-    logger.info({ orderId: order.id, ref: order.reference, merchantId: ctx.merchantId }, 'Order confirmed')
+    logger.info(
+      { orderId: order.id, ref: order.reference, hasPaystack: !!paystackResult, merchantId: ctx.merchantId },
+      'Order confirmed',
+    )
 
     return {
       newState: { ...ctx.state, phase: 'completed', activeOrderId: order.id },

@@ -16,6 +16,7 @@ import {
   handleCancelOrder,
 } from './handlers/checkout'
 import { handleUnknown, handleSupport } from './handlers/fallback'
+import { handleHumanHandoff } from './handlers/handoff'
 import { logger } from '@/lib/utils/logger'
 import type {
   ConversationContext,
@@ -97,6 +98,21 @@ export async function runStateMachine(
   logger.info({ intent: classified.intent, confidence: classified.confidence, phase: state.phase }, 'Intent classified')
 
   ctx.intent = classified
+
+  // ----------------------------------------------------------------
+  // STEP 3b: Low-confidence automatic handoff
+  // If Claude is uncertain AND there's no context upgrade available,
+  // hand off to a human rather than sending a confusing reply.
+  // ----------------------------------------------------------------
+  const HANDOFF_THRESHOLD = 0.6
+  const humanKeywords = /\b(human|person|agent|staff|someone|representative|rep|talk to|speak to|call me)\b/i
+
+  if (
+    classified.confidence === 'low' &&
+    humanKeywords.test(message)
+  ) {
+    return handleHumanHandoff(ctx, 'customer_request')
+  }
 
   // ----------------------------------------------------------------
   // STEP 4: Context-aware fallback before routing
@@ -257,7 +273,13 @@ function routeByIntent(intent: Intent, ctx: ConversationContext): Promise<Handle
     case 'cancel':          return handleCancelOrder(ctx)
     case 'support':         return handleSupport(ctx)
     case 'unknown':
-    default:                return handleUnknown(ctx)
+    default:
+      // Last-resort handoff: if we genuinely can't classify, prefer a human
+      // over a generic "I don't understand" for phrases that suggest frustration
+      if (/\b(frustrated|angry|useless|rubbish|this is not working)\b/i.test(ctx.rawMessage)) {
+        return handleHumanHandoff(ctx, 'low_confidence')
+      }
+      return handleUnknown(ctx)
   }
 }
 

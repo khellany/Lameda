@@ -1,7 +1,7 @@
 import { sendTextMessage, sendButtonsMessage } from '@/lib/telegram/client'
-import { getProductById } from '@/lib/products/search'
+import { getProductById, searchProducts } from '@/lib/products/search'
 import { generateProductDescription, formatNaira } from '@/lib/ai/respond'
-import type { ConversationContext, HandlerResult, CartItem } from '../types'
+import type { ConversationContext, HandlerResult, CartItem, ProductSummary } from '../types'
 
 /**
  * Product detail handler.
@@ -63,6 +63,11 @@ export async function handleAddToCart(ctx: ConversationContext): Promise<Handler
     const msg = "That product is no longer available. 😕"
     await sendTextMessage(ctx.botToken, ctx.chatId, msg)
     return { newState: ctx.state, newCart: ctx.cart, replySent: msg }
+  }
+
+  // Check stock before proceeding
+  if (product.stockCount === 0) {
+    return handleOutOfStock(ctx, product)
   }
 
   // Route to size selection if product has sizes
@@ -236,6 +241,43 @@ async function addToCartFinal(
     },
     newCart,
     replySent: replyText,
+  }
+}
+
+// ----------------------------------------------------------------
+// Out-of-stock handler (STORY-024)
+// ----------------------------------------------------------------
+
+async function handleOutOfStock(
+  ctx: ConversationContext,
+  product: ProductSummary,
+): Promise<HandlerResult> {
+  // Find similar products as alternatives
+  const alternatives = await searchProducts(ctx.merchantId, product.name, {
+    category: product.category ?? undefined,
+  })
+  const others = alternatives.filter(p => p.id !== product.id).slice(0, 3)
+
+  let msg =
+    `😕 Sorry, *${product.name}* is currently out of stock.\n\n`
+
+  if (others.length > 0) {
+    msg += `Here are some similar items you might like:`
+    await sendButtonsMessage(ctx.botToken, ctx.chatId, msg, [
+      ...others.map(p => ({ id: `product_${p.id}`, title: p.name.slice(0, 40) })),
+      { id: 'browse_all', title: '🛍 Browse More' },
+    ])
+  } else {
+    msg += `We don't have alternatives right now, but check back soon!`
+    await sendButtonsMessage(ctx.botToken, ctx.chatId, msg, [
+      { id: 'browse_all', title: '🛍 Browse Products' },
+    ])
+  }
+
+  return {
+    newState: { ...ctx.state, phase: 'browsing', activeProductId: undefined },
+    newCart: ctx.cart,
+    replySent: msg,
   }
 }
 
