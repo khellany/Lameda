@@ -74,6 +74,35 @@ export async function searchProducts(
   return trigramSearch(merchantId, query, filters)
 }
 
+/**
+ * Returns in-stock size/color combinations for a product.
+ * Used to filter variant selection menus — only shows options with stock > 0.
+ * Falls back to the product's flat sizes/colors arrays when no variant rows exist.
+ */
+export async function getAvailableVariants(
+  productId: string,
+): Promise<{ sizes: string[]; colors: string[]; variantMap: Map<string, number> }> {
+  const supabase = createAdminClient()
+
+  const { data } = await supabase
+    .from('product_variants')
+    .select('size, color, stock_count')
+    .eq('product_id', productId)
+    .eq('is_active', true)
+    .gt('stock_count', 0)
+
+  if (!data || data.length === 0) {
+    // No variant rows — caller uses product.sizes / product.colors directly
+    return { sizes: [], colors: [], variantMap: new Map() }
+  }
+
+  const sizes = [...new Set(data.filter(v => v.size).map(v => v.size!))]
+  const colors = [...new Set(data.filter(v => v.color).map(v => v.color!))]
+  const variantMap = new Map(data.map(v => [`${v.size ?? ''}|${v.color ?? ''}`, v.stock_count]))
+
+  return { sizes, colors, variantMap }
+}
+
 /** Fetch a single product by ID */
 export async function getProductById(
   merchantId: string,

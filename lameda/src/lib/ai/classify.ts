@@ -31,7 +31,9 @@ Classify the customer's message into exactly one intent from this list:
 - provide_address: Customer is giving a delivery address
 - confirm_order: Yes, confirm, I agree, proceed with order
 - cancel: No, cancel, stop, nevermind, I changed my mind
-- support: Help, complaint, problem, question not about products
+- order_status: Where is my order, track order, order update, delivery status
+- complaint: Wrong item, return, refund, damaged goods, complaint
+- support: Help, general question not about products
 - unknown: Cannot classify
 
 Also extract relevant entities if present:
@@ -51,6 +53,7 @@ Respond ONLY with valid JSON in this exact format:
 {
   "intent": "one of the intents above",
   "confidence": "high|medium|low",
+  "language": "en or pcm",
   "entities": {
     "productQuery": "string or null",
     "size": "string or null",
@@ -59,12 +62,14 @@ Respond ONLY with valid JSON in this exact format:
     "address": "string or null"
   },
   "raw": "your interpretation of what customer wants in one sentence"
-}`
+}
+
+For "language": set to "pcm" if the message contains Nigerian Pidgin phrases (abeg, dey, wetin, wahala, na, abi, sha, e don, make e, etc). Set to "en" otherwise.`
 
 const VALID_INTENTS = new Set<Intent>([
   'greeting', 'browse_products', 'product_inquiry', 'add_to_cart',
   'view_cart', 'remove_from_cart', 'checkout', 'provide_address',
-  'confirm_order', 'cancel', 'support', 'unknown',
+  'confirm_order', 'cancel', 'order_status', 'complaint', 'support', 'unknown',
 ])
 
 function fallbackIntent(raw: string): ClassifiedIntent {
@@ -102,6 +107,7 @@ export async function classifyIntent(message: string): Promise<ClassifiedIntent>
     return {
       intent,
       confidence: parsed.confidence ?? 'medium',
+      language: parsed.language === 'pcm' ? 'pcm' : 'en',
       entities: {
         productQuery: parsed.entities?.productQuery ?? undefined,
         size: parsed.entities?.size ?? undefined,

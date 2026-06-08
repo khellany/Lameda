@@ -2,5 +2,15 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "installCommand": "npm install",
-  "outputDirectory": ".next"
+  "outputDirectory": ".next",
+  "crons": [
+    {
+      "path": "/api/cron/cart-recovery",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/payment-expiry",
+      "schedule": "*/15 * * * *"
+    }
+  ]
 }

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"C:\\\\Users\\\\USER\\\\.claude\\\\projects\\\\c--Users-USER-projects-LamedaBot\\\\memory\\\\\")",
+      "Read(//c/Users/USER/.claude/projects/c--Users-USER-projects-LamedaBot/**)"
+    ]
+  }
+}

@@ -1,11 +1,11 @@
-import { sendTextMessage, sendButtonsMessage } from '@/lib/telegram/client'
-import { getProductById, searchProducts } from '@/lib/products/search'
+import { sendTextMessage, sendButtonsMessage, sendPhotoMessage } from '@/lib/telegram/client'
+import { getProductById, searchProducts, getAvailableVariants } from '@/lib/products/search'
 import { generateProductDescription, formatNaira } from '@/lib/ai/respond'
 import type { ConversationContext, HandlerResult, CartItem, ProductSummary } from '../types'
 
 /**
  * Product detail handler.
- * Shows full product info with Add to Cart button.
+ * Shows product image (if available) + description + Add to Cart button.
  */
 export async function handleProductDetail(ctx: ConversationContext): Promise<HandlerResult> {
   const productId = extractProductId(ctx)
@@ -28,10 +28,17 @@ export async function handleProductDetail(ctx: ConversationContext): Promise<Han
     ? await generateProductDescription(product, ctx.rawMessage)
     : buildFallbackDescription(product)
 
-  await sendButtonsMessage(ctx.botToken, ctx.chatId, description, [
+  const buttons = [
     { id: `add_to_cart_${product.id}`, title: '🛒 Add to Cart' },
     { id: 'browse_all', title: '← Back to Products' },
-  ])
+  ]
+
+  // Show image when available — visually essential for fashion
+  if (product.imageUrl) {
+    await sendPhotoMessage(ctx.botToken, ctx.chatId, product.imageUrl, description, buttons)
+  } else {
+    await sendButtonsMessage(ctx.botToken, ctx.chatId, description, buttons)
+  }
 
   return {
     newState: { ...ctx.state, phase: 'product_detail', activeProductId: product.id },
@@ -42,9 +49,7 @@ export async function handleProductDetail(ctx: ConversationContext): Promise<Han
 
 /**
  * Add to cart — entry point from "Add to Cart" button.
- * If the product has sizes, routes to size selection first.
- * If it has colors (but no sizes), routes to color selection.
- * Otherwise adds immediately.
+ * Flow: quantity → size (if any) → color (if any) → cart
  */
 export async function handleAddToCart(ctx: ConversationContext): Promise<HandlerResult> {
   const payload = ctx.intent.entities.productQuery ?? ''
@@ -65,23 +70,48 @@ export async function handleAddToCart(ctx: ConversationContext): Promise<Handler
     return { newState: ctx.state, newCart: ctx.cart, replySent: msg }
   }
 
-  // Check stock before proceeding
+  // Check overall stock
   if (product.stockCount === 0) {
     return handleOutOfStock(ctx, product)
   }
 
-  // Route to size selection if product has sizes
-  if (product.sizes.length > 0) {
-    return showSizeSelection(ctx, product.id, product.name, product.sizes)
+  // Always ask quantity first
+  return showQuantitySelection(ctx, product.id, product.name)
+}
+
+/**
+ * Called when a qty_{productId}_{qty} button is pressed.
+ * Stores pending quantity then routes to size → color → cart.
+ */
+export async function handleQuantitySelected(
+  ctx: ConversationContext,
+  productId: string,
+  quantity: number,
+): Promise<HandlerResult> {
+  const product = await getProductById(ctx.merchantId, productId)
+  if (!product) {
+    const msg = "That product is no longer available. 😕"
+    await sendTextMessage(ctx.botToken, ctx.chatId, msg)
+    return { newState: { ...ctx.state, phase: 'browsing' }, newCart: ctx.cart, replySent: msg }
   }
 
-  // Route to color selection if product has colors but no sizes
-  if (product.colors.length > 0) {
-    return showColorSelection(ctx, product.id, product.name, product.colors)
+  // Use variant stock data if available, otherwise fall back to product arrays
+  const variants = await getAvailableVariants(productId)
+  const hasVariantData = variants.sizes.length > 0 || variants.colors.length > 0
+  const sizes = hasVariantData ? variants.sizes : product.sizes
+  const colors = hasVariantData ? variants.colors : product.colors
+
+  // Store quantity in state, then route to size/color/cart
+  const stateWithQty = { ...ctx.state, pendingQuantity: quantity }
+
+  if (sizes.length > 0) {
+    return showSizeSelection({ ...ctx, state: stateWithQty }, product.id, product.name, sizes)
+  }
+  if (colors.length > 0) {
+    return showColorSelection({ ...ctx, state: stateWithQty }, product.id, product.name, colors)
   }
 
-  // No variants — add directly
-  return addToCartFinal(ctx, product.id, product.name, product.priceKobo, product.imageUrl, undefined, undefined)
+  return addToCartFinal({ ...ctx, state: stateWithQty }, product.id, product.name, product.priceKobo, product.imageUrl, undefined, undefined)
 }
 
 /**
@@ -131,6 +161,26 @@ export async function handleColorSelected(
 // ----------------------------------------------------------------
 // Private helpers
 // ----------------------------------------------------------------
+
+async function showQuantitySelection(
+  ctx: ConversationContext,
+  productId: string,
+  productName: string,
+): Promise<HandlerResult> {
+  const msg = `🔢 How many *${productName}* would you like?`
+
+  await sendButtonsMessage(ctx.botToken, ctx.chatId, msg, [
+    { id: `qty_${productId}_1`, title: '1' },
+    { id: `qty_${productId}_2`, title: '2' },
+    { id: `qty_${productId}_3`, title: '3' },
+  ])
+
+  return {
+    newState: { ...ctx.state, phase: 'selecting_quantity', activeProductId: productId },
+    newCart: ctx.cart,
+    replySent: msg,
+  }
+}
 
 async function showSizeSelection(
   ctx: ConversationContext,
@@ -193,6 +243,8 @@ async function addToCartFinal(
   size?: string,
   color?: string,
 ): Promise<HandlerResult> {
+  const qty = ctx.state.pendingQuantity ?? 1
+
   const existingIndex = ctx.cart.items.findIndex(
     i => i.productId === productId && i.size === size && i.color === color
   )
@@ -202,14 +254,14 @@ async function addToCartFinal(
   if (existingIndex >= 0) {
     updatedItems[existingIndex] = {
       ...updatedItems[existingIndex],
-      quantity: updatedItems[existingIndex].quantity + 1,
+      quantity: updatedItems[existingIndex].quantity + qty,
     }
   } else {
     const newItem: CartItem = {
       productId,
       name: productName,
       priceKobo,
-      quantity: 1,
+      quantity: qty,
       size,
       color,
       imageUrl,
@@ -222,9 +274,10 @@ async function addToCartFinal(
 
   const variant = [size, color].filter(Boolean).join(', ')
   const variantText = variant ? ` (${variant})` : ''
+  const qtyText = qty > 1 ? ` ×${qty}` : ''
   const replyText =
-    `✅ *${productName}*${variantText} added to cart!\n\n` +
-    `Cart total: *${formatNaira(totalKobo)}* (${updatedItems.length} item${updatedItems.length > 1 ? 's' : ''})`
+    `✅ *${productName}*${variantText}${qtyText} added to cart!\n\n` +
+    `Cart total: *${formatNaira(totalKobo)}* (${updatedItems.reduce((s, i) => s + i.quantity, 0)} item${updatedItems.reduce((s, i) => s + i.quantity, 0) > 1 ? 's' : ''})`
 
   await sendButtonsMessage(ctx.botToken, ctx.chatId, replyText, [
     { id: 'view_cart', title: '🛒 View Cart' },
@@ -238,6 +291,7 @@ async function addToCartFinal(
       activeProductId: undefined,
       pendingSize: undefined,
       pendingColor: undefined,
+      pendingQuantity: undefined,
     },
     newCart,
     replySent: replyText,

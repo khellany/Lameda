@@ -105,6 +105,48 @@ export async function sendButtonsMessage(
 }
 
 /**
+ * Sends a photo with an optional caption and inline keyboard buttons.
+ * Falls back to a text message with the image URL if sendPhoto fails
+ * (e.g. invalid URL or unsupported format).
+ */
+export async function sendPhotoMessage(
+  botToken: string,
+  chatId: string,
+  photoUrl: string,
+  caption: string,
+  buttons: Array<{ id: string; title: string }>,
+): Promise<SendResult> {
+  const inlineKeyboard = buttons.map(b => [{ text: b.title, callback_data: b.id }])
+
+  try {
+    const res = await fetch(`${TELEGRAM_API_BASE}/bot${botToken}/sendPhoto`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        photo: photoUrl,
+        caption,
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: inlineKeyboard },
+      }),
+    })
+
+    const data = await res.json()
+
+    if (!data.ok) {
+      logger.warn({ chatId, error: data.description }, 'sendPhoto failed — falling back to text')
+      // Fall back to text message with URL
+      return sendButtonsMessage(botToken, chatId, caption, buttons)
+    }
+
+    return { success: true, messageId: data.result.message_id }
+  } catch (err) {
+    logger.error({ err, chatId }, 'sendPhoto network error')
+    return sendButtonsMessage(botToken, chatId, caption, buttons)
+  }
+}
+
+/**
  * Sends a numbered list as inline keyboard buttons.
  * Telegram has no native "list message" - inline keyboard is the closest equivalent.
  */

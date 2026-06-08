@@ -20,12 +20,16 @@ export type Intent =
   | 'provide_address'  // Customer is giving delivery address
   | 'confirm_order'    // Yes, confirm, proceed with order
   | 'cancel'           // No, cancel, stop, nevermind
-  | 'support'          // Help, problem, complaint, question
+  | 'order_status'     // Where is my order? Track my order
+  | 'complaint'        // Return, wrong item, complaint, refund
+  | 'support'          // Help, general question
   | 'unknown'          // Could not classify
 
 export interface ClassifiedIntent {
   intent: Intent
   confidence: 'high' | 'medium' | 'low'
+  /** Detected language: 'en' = English, 'pcm' = Nigerian Pidgin */
+  language?: string
   /** Extracted entities - product name, size, color, quantity etc */
   entities: {
     productQuery?: string
@@ -46,15 +50,18 @@ export type ConversationPhase =
   | 'greeting'
   | 'browsing'
   | 'product_detail'
+  | 'selecting_quantity'    // Waiting for customer to choose how many
   | 'selecting_size'        // Waiting for customer to choose a size
   | 'selecting_color'       // Waiting for customer to choose a color
   | 'searching_by_image'    // Waiting for customer to send a photo
+  | 'selecting_delivery'    // Waiting for delivery vs pickup choice
   | 'cart_review'
   | 'collecting_address'
   | 'confirming_order'
   | 'payment_sent'
   | 'completed'
   | 'support'
+  | 'complaint'             // Structured complaint/return flow
 
 export interface ConversationState {
   phase: ConversationPhase
@@ -65,12 +72,18 @@ export interface ConversationState {
   pendingSize?: string
   /** Color selected during selecting_color phase */
   pendingColor?: string
+  /** Quantity selected during selecting_quantity phase */
+  pendingQuantity?: number
+  /** Delivery method chosen: 'delivery' | 'pickup' */
+  pendingDeliveryMethod?: 'delivery' | 'pickup'
   /** Last search query for context */
   lastQuery?: string
   /** Delivery address being collected */
   pendingAddress?: string
   /** Order reference if order was created */
   activeOrderId?: string
+  /** Detected language: 'en' | 'pcm' (Nigerian Pidgin) */
+  language?: string
 }
 
 // ----------------------------------------------------------------

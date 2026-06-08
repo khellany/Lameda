@@ -4,17 +4,22 @@ import { handleBrowse, handleBrowseCategory } from './handlers/browse'
 import {
   handleProductDetail,
   handleAddToCart,
+  handleQuantitySelected,
   handleSizeSelected,
   handleColorSelected,
 } from './handlers/product'
 import { handleSearchByPhoto, handleImageReceived } from './handlers/image'
-import { handleViewCart, handleClearCart } from './handlers/cart'
+import { handleViewCart, handleClearCart, handleRemoveCartItem } from './handlers/cart'
 import {
   handleCheckoutStart,
+  handleDeliveryChosen,
+  handlePickupChosen,
   handleAddressReceived,
   handleConfirmOrder,
   handleCancelOrder,
 } from './handlers/checkout'
+import { handleOrderStatus } from './handlers/orders'
+import { handleComplaintStart, handleComplaintCategory } from './handlers/complaint'
 import { handleUnknown, handleSupport } from './handlers/fallback'
 import { handleHumanHandoff } from './handlers/handoff'
 import { logger } from '@/lib/utils/logger'
@@ -78,6 +83,14 @@ export async function runStateMachine(
     return handleAddressReceived(ctx)
   }
 
+  // Typed quantity during selecting_quantity phase
+  if (state.phase === 'selecting_quantity' && state.activeProductId) {
+    const qty = parseInt(ctx.rawMessage.trim(), 10)
+    if (!isNaN(qty) && qty > 0) {
+      return handleQuantitySelected(ctx, state.activeProductId, Math.min(qty, 10))
+    }
+  }
+
   // During size/color selection, typed text is treated as a manual selection
   if (state.phase === 'selecting_size' && state.activeProductId) {
     const trimmed = message.trim()
@@ -95,9 +108,11 @@ export async function runStateMachine(
   // STEP 3: Classify intent via Claude Haiku
   // ----------------------------------------------------------------
   const classified = await classifyIntent(message)
-  logger.info({ intent: classified.intent, confidence: classified.confidence, phase: state.phase }, 'Intent classified')
+  logger.info({ intent: classified.intent, confidence: classified.confidence, phase: state.phase, language: classified.language }, 'Intent classified')
 
   ctx.intent = classified
+  // Persist detected language in conversation state so handlers can use it
+  if (classified.language) ctx.state = { ...ctx.state, language: classified.language }
 
   // ----------------------------------------------------------------
   // STEP 3b: Low-confidence automatic handoff
@@ -209,6 +224,39 @@ function routeButtonPayload(payload: string, ctx: ConversationContext): Promise<
   }
 
   if (payload === 'search_by_photo') return handleSearchByPhoto(ctx)
+  if (payload === 'order_status')    return handleOrderStatus(ctx)
+
+  // Quantity: qty_{productId}_{qty}
+  if (payload.startsWith('qty_')) {
+    const rest = payload.slice('qty_'.length)
+    const lastUnderscore = rest.lastIndexOf('_')
+    const productId = rest.slice(0, lastUnderscore)
+    const qty = parseInt(rest.slice(lastUnderscore + 1), 10)
+    return handleQuantitySelected(ctx, productId, isNaN(qty) ? 1 : qty)
+  }
+
+  // Remove cart item: remove_{productId}_{size}_{color}
+  if (payload.startsWith('remove_')) {
+    const rest = payload.slice('remove_'.length)
+    // productId is UUID (hyphens), then _size_color
+    // Find the first underscore AFTER the UUID (which ends 36 chars in)
+    const productId = rest.slice(0, 36)
+    const remainder = rest.slice(37) // skip the underscore after UUID
+    const underIdx = remainder.indexOf('_')
+    const size = remainder.slice(0, underIdx)
+    const color = remainder.slice(underIdx + 1)
+    return handleRemoveCartItem(ctx, productId, size, color)
+  }
+
+  // Delivery method
+  if (payload === 'delivery_choice_delivery') return handleDeliveryChosen(ctx)
+  if (payload === 'delivery_choice_pickup')   return handlePickupChosen(ctx)
+
+  // Complaint categories
+  if (payload === 'complaint_wrong_item') return handleComplaintCategory(ctx, 'wrong_item')
+  if (payload === 'complaint_delivery')   return handleComplaintCategory(ctx, 'delivery')
+  if (payload === 'complaint_return')     return handleComplaintCategory(ctx, 'return')
+  if (payload === 'complaint_other')      return handleComplaintCategory(ctx, 'other')
 
   // Category drill-down: category_{categoryName}
   if (payload.startsWith('category_')) {
@@ -271,11 +319,11 @@ function routeByIntent(intent: Intent, ctx: ConversationContext): Promise<Handle
     case 'provide_address': return handleAddressReceived(ctx)
     case 'confirm_order':   return handleConfirmOrder(ctx)
     case 'cancel':          return handleCancelOrder(ctx)
+    case 'order_status':    return handleOrderStatus(ctx)
+    case 'complaint':       return handleComplaintStart(ctx)
     case 'support':         return handleSupport(ctx)
     case 'unknown':
     default:
-      // Last-resort handoff: if we genuinely can't classify, prefer a human
-      // over a generic "I don't understand" for phrases that suggest frustration
       if (/\b(frustrated|angry|useless|rubbish|this is not working)\b/i.test(ctx.rawMessage)) {
         return handleHumanHandoff(ctx, 'low_confidence')
       }

@@ -46,6 +46,8 @@ export interface Database {
           ndpr_consent_at: string | null
           is_active: boolean
           telegram_bot_token: string | null
+          pickup_address: string | null
+          default_delivery_fee_kobo: number
         }
         Insert: {
           business_name: string
@@ -178,6 +180,8 @@ export interface Database {
           cart: Json
           last_message_at: string | null
           message_count: number
+          cart_recovery_1_sent_at: string | null
+          cart_recovery_2_sent_at: string | null
         }
         Insert: {
           merchant_id: string
@@ -196,6 +200,8 @@ export interface Database {
           cart?: Json
           last_message_at?: string | null
           message_count?: number
+          cart_recovery_1_sent_at?: string | null
+          cart_recovery_2_sent_at?: string | null
         }
         Relationships: []
       }
@@ -289,6 +295,7 @@ export interface Database {
           paystack_access_code: string | null
           payment_channel: string | null
           paid_at: string | null
+          expires_at: string | null
           metadata: Json
         }
         Insert: {
@@ -301,13 +308,16 @@ export interface Database {
           paystack_access_code?: string | null
           payment_channel?: string | null
           paid_at?: string | null
+          expires_at?: string | null
           metadata?: Json
         }
         Update: {
           status?: PaymentStatus
+          paystack_reference?: string
           paystack_access_code?: string | null
           payment_channel?: string | null
           paid_at?: string | null
+          expires_at?: string | null
           metadata?: Json
         }
         Relationships: []
@@ -338,6 +348,65 @@ export interface Database {
           status?: WebhookEventStatus
           error_message?: string | null
           processed_at?: string | null
+        }
+        Relationships: []
+      }
+
+      merchant_delivery_zones: {
+        Row: {
+          id: string
+          merchant_id: string
+          zone_name: string
+          keywords: string[]
+          fee_kobo: number
+          is_default: boolean
+          sort_order: number
+          created_at: string
+        }
+        Insert: {
+          merchant_id: string
+          zone_name: string
+          keywords?: string[]
+          fee_kobo: number
+          is_default?: boolean
+          sort_order?: number
+        }
+        Update: {
+          zone_name?: string
+          keywords?: string[]
+          fee_kobo?: number
+          is_default?: boolean
+          sort_order?: number
+        }
+        Relationships: []
+      }
+
+      product_variants: {
+        Row: {
+          id: string
+          product_id: string
+          merchant_id: string
+          size: string | null
+          color: string | null
+          stock_count: number
+          sku_variant: string | null
+          is_active: boolean
+          created_at: string
+        }
+        Insert: {
+          product_id: string
+          merchant_id: string
+          size?: string | null
+          color?: string | null
+          stock_count?: number
+          sku_variant?: string | null
+          is_active?: boolean
+        }
+        Update: {
+          size?: string | null
+          color?: string | null
+          stock_count?: number
+          is_active?: boolean
         }
         Relationships: []
       }

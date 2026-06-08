@@ -96,20 +96,43 @@ async function showProductResults(
   const products = await searchProducts(ctx.merchantId, query, filters)
 
   if (products.length === 0) {
+    // Try a shorter query (first 2 words) before giving up
+    if (query) {
+      const shortQuery = query.split(/\s+/).slice(0, 2).join(' ')
+      if (shortQuery !== query) {
+        const fallback = await searchProducts(ctx.merchantId, shortQuery, filters)
+        if (fallback.length > 0) {
+          const fallbackHeader = `No exact match for *"${query}"* — here are the closest results:`
+          await sendListMessage(ctx.botToken, ctx.chatId, fallbackHeader, fallback.map(p => ({
+            id: `product_${p.id}`,
+            title: p.name.slice(0, 40),
+            description: formatNaira(p.priceKobo),
+          })))
+          return { newState: { ...ctx.state, phase: 'browsing', lastQuery: query }, newCart: ctx.cart, replySent: fallbackHeader }
+        }
+      }
+    }
+
+    // Nothing found — show all products as a safety net
+    const allProducts = await searchProducts(ctx.merchantId, '', {})
     const label = filters.category ?? query
     const noResultText = label
-      ? `😕 No products found for *"${label}"*. Try a different search or browse by category.`
+      ? `😕 Nothing for *"${label}"* right now. ${allProducts.length > 0 ? "Here's what we have:" : 'Check back soon!'}`
       : `😕 No products listed yet. Check back soon!`
 
-    await sendButtonsMessage(ctx.botToken, ctx.chatId, noResultText, [
-      { id: 'browse_all', title: '🛍 Browse Categories' },
-    ])
-
-    return {
-      newState: { ...ctx.state, phase: 'browsing' },
-      newCart: ctx.cart,
-      replySent: noResultText,
+    if (allProducts.length > 0) {
+      await sendListMessage(ctx.botToken, ctx.chatId, noResultText, allProducts.map(p => ({
+        id: `product_${p.id}`,
+        title: p.name.slice(0, 40),
+        description: formatNaira(p.priceKobo),
+      })))
+    } else {
+      await sendButtonsMessage(ctx.botToken, ctx.chatId, noResultText, [
+        { id: 'search_by_photo', title: '📸 Search by Photo' },
+      ])
     }
+
+    return { newState: { ...ctx.state, phase: 'browsing' }, newCart: ctx.cart, replySent: noResultText }
   }
 
   const categoryLabel = filters.category

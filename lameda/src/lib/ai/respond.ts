@@ -21,6 +21,17 @@ Use warm, conversational Nigerian English. Occasionally use light Pidgin where n
 Never make up product details - only use what you're given.
 Format prices in Naira (e.g. ₦45,000 not 45000). Use emojis sparingly but warmly.`
 
+const PIDGIN_SYSTEM = `You are a helpful, friendly sales assistant for a Nigerian fashion retailer.
+You communicate via Telegram/WhatsApp. Keep replies SHORT (2-4 sentences max).
+The customer is speaking Nigerian Pidgin — reply in warm, natural Nigerian Pidgin English.
+Examples of natural Pidgin: "E fine well well!", "Abeg add am for cart", "Na ₦45,000 e go cost you"
+Never make up product details - only use what you're given.
+Format prices in Naira (e.g. ₦45,000). Use emojis sparingly but warmly.`
+
+function getSystemPrompt(language?: string): string {
+  return language === 'pcm' ? PIDGIN_SYSTEM : BASE_SYSTEM
+}
+
 /** Formats price from kobo to Naira string */
 export function formatNaira(kobo: number): string {
   return `₦${(kobo / 100).toLocaleString('en-NG')}`
@@ -29,7 +40,8 @@ export function formatNaira(kobo: number): string {
 /** Generate a warm product description for a customer inquiry */
 export async function generateProductDescription(
   product: ProductSummary,
-  customerQuestion: string
+  customerQuestion: string,
+  language?: string,
 ): Promise<string> {
   const productContext = `
 Product: ${product.name}
@@ -43,7 +55,7 @@ Category: ${product.category ?? 'Fashion'}`
     const response = await getAIClient().messages.create({
       model: AI_MODELS.responder,
       max_tokens: 200,
-      system: BASE_SYSTEM,
+      system: getSystemPrompt(language),
       messages: [{
         role: 'user',
         content: `Customer asked: "${customerQuestion}"\n\nProduct details:\n${productContext}\n\nWrite a warm, helpful 2-3 sentence reply about this product. End with asking if they'd like to add it to their cart.`,
@@ -104,12 +116,12 @@ export async function analyzeProductImage(
 }
 
 /** Generate a support reply for customer complaints or complex questions */
-export async function generateSupportReply(customerMessage: string): Promise<string> {
+export async function generateSupportReply(customerMessage: string, language?: string): Promise<string> {
   try {
     const response = await getAIClient().messages.create({
       model: AI_MODELS.responder,
       max_tokens: 150,
-      system: BASE_SYSTEM,
+      system: getSystemPrompt(language),
       messages: [{
         role: 'user',
         content: `Customer support message: "${customerMessage}"\n\nWrite a warm, empathetic reply acknowledging their concern and letting them know a team member will follow up shortly.`,
