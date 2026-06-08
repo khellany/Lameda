@@ -1,5 +1,5 @@
 /**
- * Telegram Bot API type definitions and message normalizer.
+ * Telegram Bot API type definitions, Zod schema, and message normalizer.
  *
  * Telegram sends an "Update" object to our webhook on every message.
  * We normalize it into the same NormalizedMessage shape used throughout
@@ -12,6 +12,67 @@
  * When switching to WhatsApp, only this file and client.ts need to change.
  * The NormalizedMessage type and everything that consumes it stays the same.
  */
+
+import { z } from 'zod'
+
+// ----------------------------------------------------------------
+// Zod schema (STORY-018) — validates raw webhook payload at runtime.
+// We parse the unknown JSON body with this before trusting any field.
+// ----------------------------------------------------------------
+
+const TelegramUserSchema = z.object({
+  id: z.number(),
+  first_name: z.string(),
+  last_name: z.string().optional(),
+  username: z.string().optional(),
+})
+
+const TelegramChatSchema = z.object({
+  id: z.number(),
+  type: z.enum(['private', 'group', 'supergroup', 'channel']),
+})
+
+const TelegramPhotoSizeSchema = z.object({
+  file_id: z.string(),
+  width: z.number(),
+  height: z.number(),
+})
+
+const TelegramDocumentSchema = z.object({
+  file_id: z.string(),
+  file_name: z.string().optional(),
+  mime_type: z.string().optional(),
+})
+
+const TelegramMessageSchema = z.object({
+  message_id: z.number(),
+  from: TelegramUserSchema.optional(),
+  chat: TelegramChatSchema,
+  date: z.number(),
+  text: z.string().optional(),
+  photo: z.array(TelegramPhotoSizeSchema).optional(),
+  document: TelegramDocumentSchema.optional(),
+  caption: z.string().optional(),
+})
+
+const TelegramCallbackQuerySchema = z.object({
+  id: z.string(),
+  from: TelegramUserSchema,
+  message: TelegramMessageSchema.optional(),
+  data: z.string().optional(),
+})
+
+export const TelegramUpdateSchema = z.object({
+  update_id: z.number(),
+  message: TelegramMessageSchema.optional(),
+  callback_query: TelegramCallbackQuerySchema.optional(),
+})
+
+export type TelegramUpdateParsed = z.infer<typeof TelegramUpdateSchema>
+
+// ----------------------------------------------------------------
+// TypeScript interfaces (kept for backwards-compat with existing code)
+// ----------------------------------------------------------------
 
 // Subset of the Telegram Update object we care about
 export interface TelegramUpdate {

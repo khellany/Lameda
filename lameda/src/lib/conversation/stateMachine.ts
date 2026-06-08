@@ -1,4 +1,5 @@
-import { classifyIntent } from '@/lib/ai/classify'
+import { classifyIntent, buildMerchantContext } from '@/lib/ai/classify'
+import type { MerchantConfig } from '@/lib/merchant/config'
 import { sendButtonsMessage as sendButtons, answerCallbackQuery } from '@/lib/telegram/client'
 import { handleGreeting } from './handlers/greeting'
 import { handleBrowse, handleBrowseCategory, handleSearchEverythingPrompt } from './handlers/browse'
@@ -58,6 +59,7 @@ export async function runStateMachine(
   botToken: string,
   chatId: string,
   callbackQueryId: string | null = null,
+  merchantConfig?: MerchantConfig,
 ): Promise<HandlerResult> {
 
   // ----------------------------------------------------------------
@@ -66,7 +68,7 @@ export async function runStateMachine(
   // route directly to image search regardless of current phase.
   // ----------------------------------------------------------------
   if (mediaUrl && !buttonPayload) {
-    const ctx = buildCtx({ message, mediaUrl, state, cart, merchantId, customerId, conversationId, botToken, chatId })
+    const ctx = buildCtx({ message, mediaUrl, state, cart, merchantId, customerId, conversationId, botToken, chatId, merchantConfig })
     return handleImageReceived(ctx, mediaUrl)
   }
 
@@ -108,11 +110,11 @@ export async function runStateMachine(
       }
     }
 
-    const ctx = buildCtx({ message, mediaUrl, state, cart, merchantId, customerId, conversationId, botToken, chatId })
+    const ctx = buildCtx({ message, mediaUrl, state, cart, merchantId, customerId, conversationId, botToken, chatId, merchantConfig })
     return routeButtonPayload(buttonPayload, ctx)
   }
 
-  const ctx = buildCtx({ message, mediaUrl, state, cart, merchantId, customerId, conversationId, botToken, chatId })
+  const ctx = buildCtx({ message, mediaUrl, state, cart, merchantId, customerId, conversationId, botToken, chatId, merchantConfig })
 
   // ----------------------------------------------------------------
   // STEP 2: Phase-locked routing
@@ -198,7 +200,8 @@ export async function runStateMachine(
   // ----------------------------------------------------------------
   // STEP 3: Classify intent via Claude Haiku
   // ----------------------------------------------------------------
-  const classified = await classifyIntent(message)
+  const merchantContextStr = merchantConfig ? buildMerchantContext(merchantConfig) : undefined
+  const classified = await classifyIntent(message, merchantContextStr)
   logger.info({ intent: classified.intent, confidence: classified.confidence, phase: state.phase, language: classified.language }, 'Intent classified')
 
   ctx.intent = classified
@@ -449,6 +452,7 @@ function buildCtx(params: {
   conversationId: string
   botToken: string
   chatId: string
+  merchantConfig?: MerchantConfig
 }): ConversationContext {
   return {
     merchantId: params.merchantId,
@@ -460,6 +464,7 @@ function buildCtx(params: {
     cart: params.cart,
     rawMessage: params.message,
     mediaUrl: params.mediaUrl,
+    merchantConfig: params.merchantConfig,
     intent: { intent: 'unknown', confidence: 'low', entities: {}, raw: params.message },
   }
 }

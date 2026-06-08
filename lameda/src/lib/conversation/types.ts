@@ -5,6 +5,9 @@
  * Keep types flat and JSON-safe — no classes, no Date objects, no undefined.
  */
 
+import type { MerchantConfig } from '@/lib/merchant/config'
+export type { MerchantConfig } from '@/lib/merchant/config'
+
 // ----------------------------------------------------------------
 // INTENT
 // ----------------------------------------------------------------
@@ -143,6 +146,8 @@ export interface ConversationContext {
   rawMessage: string
   /** Telegram file_id when the customer sent a photo or document */
   mediaUrl: string | null
+  /** Merchant config resolved from business_type + merchant_config overrides */
+  merchantConfig?: MerchantConfig
 }
 
 // ----------------------------------------------------------------

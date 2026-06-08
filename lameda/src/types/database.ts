@@ -19,7 +19,8 @@ export type OrderStatus = 'pending' | 'confirmed' | 'paid' | 'shipped' | 'delive
 export type PaymentStatus = 'pending' | 'success' | 'failed' | 'refunded'
 export type MessageDirection = 'inbound' | 'outbound'
 export type MessageType = 'text' | 'image' | 'button' | 'list' | 'template'
-export type WebhookSource = 'termii' | 'paystack'
+export type WebhookSource = 'termii' | 'paystack' | 'telegram'
+export type BusinessType = 'fashion' | 'food' | 'electronics' | 'beauty' | 'services' | 'general'
 export type WebhookEventStatus = 'received' | 'processed' | 'failed' | 'duplicate'
 export type ActorType = 'merchant' | 'customer' | 'system' | 'admin'
 export type DeliveryMethod = 'pickup' | 'delivery'
@@ -48,6 +49,8 @@ export interface Database {
           telegram_bot_token: string | null
           pickup_address: string | null
           default_delivery_fee_kobo: number
+          business_type: BusinessType
+          merchant_config: Json
         }
         Insert: {
           business_name: string
@@ -64,6 +67,8 @@ export interface Database {
           ndpr_consent_at?: string | null
           is_active?: boolean
           telegram_bot_token?: string | null
+          business_type?: BusinessType
+          merchant_config?: Json
         }
         Update: {
           business_name?: string
@@ -78,6 +83,8 @@ export interface Database {
           bot_name?: string
           bot_personality?: string | null
           ndpr_consent_at?: string | null
+          business_type?: BusinessType
+          merchant_config?: Json
           is_active?: boolean
           telegram_bot_token?: string | null
         }

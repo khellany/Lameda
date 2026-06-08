@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyTelegramWebhook } from '@/lib/telegram/verify'
-import { normalizeTelegramUpdate, type TelegramUpdate } from '@/lib/telegram/types'
+import { TelegramUpdateSchema, normalizeTelegramUpdate } from '@/lib/telegram/types'
 import { createAdminClient } from '@/lib/supabase/server'
 import { logger } from '@/lib/utils/logger'
 import { runStateMachine } from '@/lib/conversation/stateMachine'
+import { sendTextMessage } from '@/lib/telegram/client'
+import { checkCustomerRateLimit } from '@/lib/utils/rateLimit'
+import { getMerchantConfig, type BusinessType } from '@/lib/merchant/config'
 import type { ConversationState, Cart } from '@/lib/conversation/types'
 
 /**
@@ -52,14 +55,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ ok: true }) // Return 200 anyway to avoid Telegram retry loop
   }
 
-  let update: TelegramUpdate
-
+  // Parse + validate payload with Zod (STORY-018)
+  let rawBody: unknown
   try {
-    update = (await request.json()) as TelegramUpdate
+    rawBody = await request.json()
   } catch {
     logger.error({ merchantId }, 'Telegram webhook payload is not valid JSON')
     return NextResponse.json({ ok: true })
   }
+
+  const parseResult = TelegramUpdateSchema.safeParse(rawBody)
+  if (!parseResult.success) {
+    logger.warn({ merchantId, issues: parseResult.error.issues }, 'Telegram payload failed schema validation')
+    return NextResponse.json({ ok: true })
+  }
+
+  const update = parseResult.data
 
   const supabase = createAdminClient()
   const externalId = String(update.update_id)
@@ -93,10 +104,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   const webhookEventId = webhookEvent?.id
 
   try {
-    // Step 3: Load merchant
+    // Step 3: Load merchant (includes business_type + merchant_config for Sprint 4)
     const { data: merchant } = await supabase
       .from('merchants')
-      .select('id, bot_name, telegram_bot_token, subscription_tier, is_active')
+      .select('id, bot_name, telegram_bot_token, subscription_tier, is_active, business_type, merchant_config')
       .eq('id', merchantId)
       .eq('is_active', true)
       .maybeSingle()
@@ -106,6 +117,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       await markWebhookFailed(supabase, webhookEventId, 'Merchant not found')
       return NextResponse.json({ ok: true })
     }
+
+    // Resolve MerchantConfig from business_type + JSONB overrides (STORY-019)
+    const merchantConfig = getMerchantConfig(
+      (merchant.business_type as BusinessType) ?? 'general',
+      (merchant.merchant_config as Partial<import('@/lib/merchant/config').MerchantConfig>) ?? undefined,
+    )
 
     // Step 4: Normalize update
     const message = normalizeTelegramUpdate(update, merchant.bot_name)
@@ -144,6 +161,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       logger.error({ merchantId }, 'Customer upsert failed')
       await markWebhookFailed(supabase, webhookEventId, 'Customer upsert failed')
       return NextResponse.json({ ok: true })
+    }
+
+    // Step 5b: Rate limit check (STORY-017 / TD-004)
+    // Button callbacks are exempt — they don't trigger AI calls.
+    if (!update.callback_query) {
+      const { allowed, count } = await checkCustomerRateLimit(merchant.id, customer.id)
+      if (!allowed) {
+        logger.warn({ customerId: customer.id, merchantId, count }, 'Rate limit exceeded — dropping message')
+        await sendTextMessage(
+          merchant.telegram_bot_token,
+          message.from,
+          `⏳ You're sending messages too quickly. Please wait a moment before sending another. 😊`,
+        )
+        await markWebhookProcessed(supabase, webhookEventId)
+        return NextResponse.json({ ok: true })
+      }
     }
 
     // Step 6: Load or create conversation with full state
@@ -220,6 +253,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       merchant.telegram_bot_token,
       message.from,
       callbackQueryId,
+      merchantConfig,
     )
 
     // Step 8: Persist updated state and cart

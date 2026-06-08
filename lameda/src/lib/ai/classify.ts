@@ -107,17 +107,29 @@ function fallbackIntent(raw: string): ClassifiedIntent {
   return { intent: 'unknown', confidence: 'low', entities: {}, raw }
 }
 
-export async function classifyIntent(message: string): Promise<ClassifiedIntent> {
+/**
+ * Classify the customer's intent.
+ *
+ * @param message     Raw customer message text.
+ * @param merchantContext  Optional one-paragraph context string from buildMerchantContext().
+ *                    Appended to the system prompt so Claude adjusts terminology
+ *                    (e.g. "dish" instead of "item" for food merchants).
+ */
+export async function classifyIntent(message: string, merchantContext?: string): Promise<ClassifiedIntent> {
   // Short-circuit obvious cases locally to save API cost
   const trimmed = message.trim()
   if (trimmed.length < 3) return { intent: 'unknown', confidence: 'low', entities: {}, raw: trimmed }
   if (trimmed === '/start') return { intent: 'greeting', confidence: 'high', entities: {}, raw: trimmed }
 
+  const systemPrompt = merchantContext
+    ? `${CLASSIFIER_SYSTEM_PROMPT}\n\nMERCHANT CONTEXT:\n${merchantContext}`
+    : CLASSIFIER_SYSTEM_PROMPT
+
   try {
     const response = await getAIClient().messages.create({
       model: AI_MODELS.classifier,
       max_tokens: 256,
-      system: CLASSIFIER_SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: [{ role: 'user', content: trimmed }],
     })
 
@@ -148,3 +160,7 @@ export async function classifyIntent(message: string): Promise<ClassifiedIntent>
     return fallbackIntent(trimmed)
   }
 }
+
+// Re-export for callers that import classify + merchant helpers from one place
+export type { MerchantConfig } from '@/lib/merchant/config'
+export { buildMerchantContext } from '@/lib/merchant/config'
