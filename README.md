@@ -11,16 +11,17 @@
 
 | Sprint | Scope | Status | Last Updated |
 |--------|-------|--------|-------------|
-| Sprint 1 | Foundation - Webhook ingestion, DB schema, project scaffold | **Complete** | June 2026 |
-| Sprint 2 | Conversation state machine, AI intent classification | **Complete** | June 2026 |
-| Sprint 3 | Cart flow, Paystack payment integration | Not started | - |
-| Sprint 4 | Merchant onboarding dashboard | Not started | - |
+| Sprint 1 | Foundation - webhook ingestion, DB schema, project scaffold, Telegram integration | **Complete** | June 2026 |
+| Sprint 2 | Conversation state machine, AI intent classification, cart flow | **Complete** | June 2026 |
+| Sprint 3 | Paystack payments, product catalog (variants, embeddings, CSV import) | **Complete** | June 2026 |
+| Sprint 4 | Merchant onboarding, PII encryption, CRM API layer | **In Progress** | June 2026 |
+| Sprint 5 | Merchant web dashboard UI, pgvector semantic search | Not started | - |
 
 ### Sprint 1 - Completed Items
 
 - [x] Git repository initialized
 - [x] Product documentation committed (v1, v2, v3, artifacts)
-- [x] Next.js 14 (App Router) scaffold created in `lameda/`
+- [x] Next.js 16 (App Router, Turbopack) scaffold created in `lameda/`
 - [x] TypeScript, Tailwind, ESLint configured
 - [x] Supabase client (browser + server + admin) set up
 - [x] Structured logger (Pino) configured with PII redaction
@@ -40,25 +41,20 @@
 - [x] Technical debt register (`lameda/docs/TECHNICAL_DEBT.md`)
 - [x] Contributing and handover guide (`lameda/docs/CONTRIBUTING.md`)
 - [x] Environment variables template (`.env.local.example`)
-
-### Sprint 1 - In Progress / Pending
-
 - [x] Supabase project provisioned and connected
-- [x] All 10 tables verified in production database (June 2026)
-- [x] `.env.local` configured with Supabase credentials
+- [x] All 10 DB tables verified in production database (June 2026)
 - [x] Telegram channel selected (replaces Termii/WhatsApp for dev)
 - [x] Telegram webhook handler built (`/api/webhook/telegram/[merchantId]`)
 - [x] Migration 003 applied (`telegram_bot_token` column on merchants)
 - [x] Vercel project created — `https://lameda.vercel.app`
 - [x] All environment variables configured on Vercel
 - [x] Production deployment live — `https://lameda.vercel.app`
-- [x] Health check confirmed: `status: ok`, `db: connected` (921ms)
-- [x] All 10 DB tables verified from production (June 2026)
+- [x] Health check confirmed: `status: ok`, `db: connected`
 - [x] GitHub repo synced — `https://github.com/khellany/Lameda`
 - [x] Vercel root directory configured to `lameda/` subdirectory
-- [ ] Telegram bot created via @BotFather and token added to Vercel env
-- [ ] `node scripts/setup-telegram.mjs` run to register webhook URL
-- [ ] End-to-end test: send Telegram message, verify DB record created
+- [x] Telegram bot created via BotFather and token added to Vercel env
+- [x] Telegram webhook registered via `node scripts/setup-telegram.mjs`
+- [x] End-to-end test: Telegram message received, DB record created
 
 ### Sprint 1 — Infrastructure Summary
 
@@ -66,9 +62,9 @@
 |-------|--------|--------|
 | GitHub | Live | `github.com/khellany/Lameda` |
 | Vercel | Live | `lameda.vercel.app` |
-| Supabase | Live | 10 tables, RLS enabled, pgvector active |
+| Supabase | Live | 13 migrations applied, RLS enabled, pgvector active |
 | Health check | Passing | `status: ok`, DB connected |
-| Telegram webhook | Built | Pending BotFather setup |
+| Telegram webhook | Live | Per-merchant webhook routing active |
 | WhatsApp webhook | Built | Deferred to post-MVP |
 
 ### Sprint 2 - Completed Items
@@ -83,13 +79,55 @@
 - [x] View/clear cart handler - cart summary with totals
 - [x] Checkout handler - address collection, order summary, order creation
 - [x] Fallback handler - unknown intent redirect, AI support replies
-- [x] Product search (pg_trgm fuzzy search - pgvector deferred to Sprint 3)
+- [x] Product search (pg_trgm fuzzy search)
 - [x] Webhook stub replaced with full state machine
 - [x] ConversationState + Cart persisted to Supabase on every message
 
 > **Channel decision:** Using Telegram for development and testing.
 > WhatsApp (Meta Cloud API) integration deferred to post-MVP.
 > All channel code is isolated in `src/lib/telegram/` and `src/lib/whatsapp/`.
+
+### Sprint 3 - Completed Items
+
+- [x] Paystack payment link generation (`POST /api/test/payment-link`)
+- [x] Paystack charge.success webhook handler (`POST /api/webhooks/paystack`)
+- [x] Payment callback page (`/payment/callback`) — redirect after Paystack hosted page
+- [x] Payment expiry cron (`POST /api/cron/payment-expiry`) — daily 08:00 UTC, restores stock on expiry
+- [x] Abandoned cart recovery cron (`POST /api/cron/cart-recovery`) — daily 08:00 UTC
+- [x] Supabase DB webhook (`POST /api/webhooks/order-delivered`) — fires Telegram delivery confirmation on order status change
+- [x] Product variants support (migration 006)
+- [x] Delivery zones (migration 005)
+- [x] Business type field on merchants (migration 008)
+- [x] Telegram webhook source tracking (migration 007)
+- [x] Product embeddings table + OpenAI embed endpoint (`POST /api/products/[productId]/embed`)
+- [x] Bulk embed endpoint (`POST /api/products/embed-all`)
+- [x] CSV product import endpoint (`POST /api/products/import`)
+
+### Sprint 4 - Completed Items
+
+- [x] Merchant self-service registration form (`/onboard` page)
+- [x] Merchant registration API (`POST /api/merchants/register`) — creates merchant row + Supabase auth user + sends welcome email
+- [x] AES-256-GCM field-level PII encryption (`src/lib/crypto/pii.ts`) — encrypts `email`, `owner_name`, `telegram_bot_token` at rest
+- [x] Migration 009 (`merchant_self_service`) — onboarding fields
+- [x] Migration 010 (`pii_encryption`) — drops plaintext constraints incompatible with ciphertext
+- [x] Migration 011 (`admin_telegram`) — admin bot token field
+- [x] Migration 012 (`drop_email_check_constraint`) — removes email format check (blocked AES ciphertext)
+- [x] Migration 013 (`merchant_auth_user`) — `auth_user_id` column linking merchants to Supabase Auth
+- [x] Resend email integration (`src/lib/email/`) — transactional email via Resend SDK
+- [x] Merchant welcome email template (HTML + plain text) — temp password + login link on registration
+- [x] Admin resend-welcome endpoint (`POST /api/admin/merchants/resend-welcome`) — resets auth password and resends onboarding email
+- [x] Merchant login page (`/login`)
+- [x] CRM customers endpoint (`GET /api/crm/customers`) — paginated, PII decrypted on read
+- [x] CRM orders endpoint (`GET /api/crm/orders`) — paginated, delivery address decrypted on read
+- [x] Bot token reveal endpoint (`POST /api/crm/reveal-token`) — audit-gated, rate-limited
+- [x] Telegram bot token rotation (`POST /api/merchants/rotate-token`)
+
+### Sprint 4 - Remaining
+
+- [ ] Merchant CRM dashboard UI (web pages for orders, customers, products)
+- [ ] Product management UI (add/edit/delete products via CRM)
+- [ ] TypeScript types regenerated after migration 013 (removes `@ts-expect-error` workarounds)
+- [ ] `lameda.ng` domain verified in Resend (enables sending from `hello@lameda.ng`)
 
 ---
 
@@ -109,15 +147,27 @@ Lameda turns WhatsApp into a 24/7 AI-powered sales assistant for Nigerian fashio
 
 ```
 LamedaBot/
-├── README.md                      This file - project index
-├── v1/                            Original product artifacts (baseline)
-├── v2/                            Improved artifacts (post-critique)
+├── README.md                      This file - project index and development status
+├── lameda/                        The application (Next.js 16, Supabase, Telegram bot)
+│   └── README.md                  Full technical documentation, API reference, env vars
+├── artifacts/                     Consolidated strategic documents
+│   ├── PRODUCT.md
+│   ├── ENGINEERING.md
+│   ├── BUSINESS.md
+│   ├── MARKETING.md
+│   ├── OPERATIONS.md
+│   ├── DESIGN.md
+│   └── STRATEGY.md
+├── v1/                            Original product artifacts (April 2026, baseline)
+├── v2/                            Improved artifacts (May 2026, post-critique)
 └── v3/                            Deep-dive strategic and engineering documents
     ├── engineering/               System design, ADRs, technical documentation
     ├── marketing/                 Competitive brief
     ├── operations/                Process optimization, risk register
     └── product/                   Brainstorm, roadmap, strategic analysis
 ```
+
+For full technical documentation, API endpoints, environment variable reference, and local setup instructions, see [`lameda/README.md`](lameda/README.md).
 
 ---
 
