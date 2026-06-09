@@ -44,16 +44,26 @@ export async function POST(request: NextRequest) {
   const { api_key } = parsed.data
   const supabase = createAdminClient()
 
-  // ── Fetch merchant ────────────────────────────────────────────────────────
+  // ── Fetch merchant (typed columns only) ──────────────────────────────────
   const { data: merchant, error: fetchError } = await supabase
     .from('merchants')
-    .select('id, business_name, bot_name, email, owner_name, auth_user_id, api_key')
+    .select('id, business_name, bot_name, email, owner_name, api_key')
     .eq('api_key', api_key)
     .single()
 
   if (fetchError || !merchant) {
     return NextResponse.json({ error: 'Merchant not found' }, { status: 404 })
   }
+
+  // ── Fetch auth_user_id separately (untyped — column added in migration 013) ─
+  // @ts-expect-error — auth_user_id added in migration 013; remove after regenerating types
+  const { data: authRow } = await supabase
+    .from('merchants')
+    .select('auth_user_id')
+    .eq('api_key', api_key)
+    .single()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const authUserId = (authRow as any)?.auth_user_id as string | null ?? null
 
   // ── Decrypt PII ───────────────────────────────────────────────────────────
   let plaintextEmail: string
@@ -71,9 +81,9 @@ export async function POST(request: NextRequest) {
   const pick = () => words[Math.floor(Math.random() * words.length)]
   const newTempPassword = `${pick()}-${pick()}-${Math.floor(1000 + Math.random() * 9000)}`
 
-  if (merchant.auth_user_id) {
+  if (authUserId) {
     const { error: resetError } = await supabase.auth.admin.updateUserById(
-      merchant.auth_user_id,
+      authUserId,
       { password: newTempPassword }
     )
     if (resetError) {
@@ -90,7 +100,7 @@ export async function POST(request: NextRequest) {
     businessName: merchant.business_name,
     botName:      merchant.bot_name,
     apiKey:       merchant.api_key,
-    tempPassword: merchant.auth_user_id ? newTempPassword : '(contact support)',
+    tempPassword: authUserId ? newTempPassword : '(contact support)',
     loginEmail:   plaintextEmail,
     appUrl,
   })
@@ -121,6 +131,6 @@ export async function POST(request: NextRequest) {
     merchant_id: merchant.id,
     business_name: merchant.business_name,
     email_id: emailData?.id,
-    password_reset: !!merchant.auth_user_id,
+    password_reset: !!authUserId,
   })
 }
