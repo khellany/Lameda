@@ -156,16 +156,21 @@ export async function POST(request: NextRequest) {
   })
 
   try {
-    await getEmailClient().emails.send({
+    const { data: emailData, error: emailError } = await getEmailClient().emails.send({
       from: FROM_ADDRESS,
       to: data.email,
       subject,
       html,
       text,
     })
-    logger.info({ merchantId: merchant.id }, 'Welcome email sent')
+    if (emailError) {
+      // Resend returns { data, error } — doesn't throw on API errors
+      logger.error({ err: emailError, merchantId: merchant.id }, 'Welcome email rejected by Resend')
+    } else {
+      logger.info({ merchantId: merchant.id, emailId: emailData?.id }, 'Welcome email sent')
+    }
   } catch (emailErr) {
-    logger.error({ err: emailErr, merchantId: merchant.id }, 'Welcome email failed to send')
+    logger.error({ err: emailErr, merchantId: merchant.id }, 'Welcome email failed (network error)')
   }
 
   return NextResponse.json({
