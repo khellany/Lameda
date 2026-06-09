@@ -1,6 +1,8 @@
 # Lameda - Product and Strategy Repository
 **Project:** Lameda Conversational Commerce Platform
-**Founder:** Dayo Oladayo Kelani
+
+**Creator:** Dayo Oladayo Kelani
+
 **Status:** Pre-Seed | Active Development
 
 ---
