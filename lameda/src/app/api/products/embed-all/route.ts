@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
               product_id: product.id,
               merchant_id: merchantId,
               text_content: textContent,
-              embedding,
+              embedding: embedding as unknown as string,
               model_version: CURRENT_MODEL,
             },
             { onConflict: 'product_id' },

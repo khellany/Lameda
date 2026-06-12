@@ -138,7 +138,7 @@ async function vectorSearch(
 
   const { data, error } = await supabase.rpc('search_products_by_embedding', {
     p_merchant_id: merchantId,
-    p_embedding: embedding,
+    p_embedding: embedding as unknown as string,
     p_threshold: SIMILARITY_THRESHOLD,
     p_limit: MAX_RESULTS,
   })

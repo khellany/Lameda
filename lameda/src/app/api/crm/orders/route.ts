@@ -23,7 +23,9 @@ import { resolveMerchantFromApiKey } from '@/lib/crm/auth'
 import { safeDecrypt } from '@/lib/crypto/pii'
 import { formatNaira } from '@/lib/ai/respond'
 import { logger } from '@/lib/utils/logger'
-import type { OrderStatus } from '@/types/database'
+import type { Enums } from '@/types/database'
+
+type OrderStatus = Enums<'order_status'>
 
 export async function GET(request: NextRequest) {
   const merchant = await resolveMerchantFromApiKey(request)

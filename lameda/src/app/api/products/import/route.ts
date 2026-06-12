@@ -196,7 +196,7 @@ async function embedProductsBatch(
           product_id: product.id,
           merchant_id: merchantId,
           text_content: textContent,
-          embedding,
+          embedding: embedding as unknown as string,
           model_version: 'text-embedding-3-small',
         },
         { onConflict: 'product_id' },
