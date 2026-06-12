@@ -10,8 +10,10 @@ export default withSentryConfig(nextConfig, {
   project: process.env.SENTRY_PROJECT ?? 'lameda',
   // Suppress Sentry CLI output on local builds; CI gets full output
   silent: !process.env.CI,
-  // Upload source maps without exposing them in the deployed bundle
-  hideSourceMaps: true,
+  // Upload source maps to Sentry but delete them from the deployed bundle
+  sourcemaps: {
+    deleteSourcemapsAfterUpload: true,
+  },
   // Route Sentry events through /monitoring to avoid ad-blocker drops
   tunnelRoute: '/monitoring',
   // Disable Sentry logger to reduce bundle size
