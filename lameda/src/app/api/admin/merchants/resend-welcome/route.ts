@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
     ownerName:    plaintextOwnerName,
     businessName: merchant.business_name,
     botName:      merchant.bot_name,
-    apiKey:       merchant.api_key,
+    apiKey:       merchant.api_key ?? '',
     tempPassword: authUserId ? newTempPassword : '(contact support)',
     loginEmail:   plaintextEmail,
     appUrl,
