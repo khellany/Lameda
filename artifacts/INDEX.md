@@ -2,7 +2,7 @@
 
 **Project:** Lameda Conversational Commerce Platform
 **Founder:** Dayo Oladayo Kelani
-**Status:** Pre-Seed | May 2026
+**Status:** Pre-Seed | June 2026 | Sprint 4 Complete — Telegram-first MVP in progress
 **Last Updated:** June 2026
 
 > This folder is the canonical reference layer for all Lameda documentation.
@@ -21,13 +21,13 @@
 | **Engineering** | System Design Document | v3 | `v3/engineering/System_Design_Document_v3.md` |
 | **Engineering** | Architecture Decision Records | v3 | `v3/engineering/Architecture_ADRs_v3.md` |
 | **Engineering** | Technical Documentation | v3 | `v3/engineering/Technical_Documentation_v3.md` |
-| **Engineering** | Database Schema | v2 | `v2/05_Database_Schema_v2.md` |
-| **Engineering** | API Specifications | v2 | `v2/06_API_Specifications_v2.md` |
-| **Engineering** | Development Backlog | v2 | `v2/07_Development_Backlog_v2.md` |
+| **Engineering** | Database Schema | v2.1 | `v2/05_Database_Schema_v2.md` |
+| **Engineering** | API Specifications | v2.1 | `v2/06_API_Specifications_v2.md` |
+| **Engineering** | Development Backlog | v2.1 | `v2/07_Development_Backlog_v2.md` |
 | **Business** | Business Model Canvas | v2 | `v2/02_Business_Model_Canvas_v2.md` |
 | **Business** | Business Case | v2 | `v2/Lameda_Business_Case_v2.md` |
-| **Business** | Financial Model | v2 | `v2/09_Financial_Model_v2.xlsx` |
-| **Business** | Investor Pitch Deck | v2 | `v2/10_Pitch_Deck_v2.pptx` |
+| **Business** | Financial Model | v2 | `v2/09_Financial_Model_v2.xlsx` ⚠️ *file not yet in repo* |
+| **Business** | Investor Pitch Deck | v2 | `v2/10_Pitch_Deck_v2.pptx` ⚠️ *file not yet in repo* |
 | **Marketing** | Competitive Brief | v3 | `v3/marketing/Competitive_Brief_v3.md` |
 | **Marketing** | Landing Page Copy | v2 | `v2/08_Landing_Page_Copy_v2.md` |
 | **Marketing** | Go-to-Market Strategy | v2 | `v2/03_Strategy_and_Future_Plan_v2.md` |

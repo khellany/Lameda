@@ -25,7 +25,7 @@ export async function handleUnknown(ctx: ConversationContext): Promise<HandlerRe
 }
 
 export async function handleSupport(ctx: ConversationContext): Promise<HandlerResult> {
-  const reply = await generateSupportReply(ctx.rawMessage)
+  const reply = await generateSupportReply(ctx.rawMessage, ctx.state.language)
   await sendButtonsMessage(ctx.botToken, ctx.chatId, reply, [
     { id: 'browse_all', title: '🛍 Back to Shopping' },
   ])

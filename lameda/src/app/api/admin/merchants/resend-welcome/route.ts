@@ -55,8 +55,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Merchant not found' }, { status: 404 })
   }
 
-  // ── Fetch auth_user_id separately (untyped — column added in migration 013) ─
-  // @ts-expect-error — auth_user_id added in migration 013; remove after regenerating types
   const { data: authRow } = await supabase
     .from('merchants')
     .select('auth_user_id')

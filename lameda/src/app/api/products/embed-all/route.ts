@@ -16,7 +16,7 @@
  * Response:
  *   { processed: number, skipped: number, failed: number, total: number }
  *
- * Auth: X-Merchant-Id + X-Api-Key (= MERCHANT_API_KEY env var)
+ * Auth: X-Merchant-Api-Key: lmd_xxxxx  (per-merchant key from onboarding)
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -28,18 +28,29 @@ const CURRENT_MODEL = 'text-embedding-3-small'
 const BATCH_SIZE = 10
 
 export async function POST(request: NextRequest) {
-  const merchantId = request.headers.get('x-merchant-id')
-  const apiKey = request.headers.get('x-api-key')
+  const supabase = createAdminClient()
+  const merchantApiKey = request.headers.get('x-merchant-api-key')
 
-  if (!merchantId || apiKey !== process.env.MERCHANT_API_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!merchantApiKey) {
+    return NextResponse.json({ error: 'Missing X-Merchant-Api-Key header' }, { status: 401 })
   }
+
+  const { data: merchantRow } = await supabase
+    .from('merchants')
+    .select('id')
+    .eq('api_key', merchantApiKey)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!merchantRow) {
+    return NextResponse.json({ error: 'Invalid API key' }, { status: 401 })
+  }
+
+  const merchantId = merchantRow.id
 
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json({ error: 'OPENAI_API_KEY is not configured' }, { status: 503 })
   }
-
-  const supabase = createAdminClient()
 
   // Fetch all active products for this merchant
   const { data: products, error } = await supabase

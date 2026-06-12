@@ -1,322 +1,418 @@
-# Lameda - API Specifications v2
-**Version:** 2.0 | **Base URL:** `https://api.lameda.ng` | **Date:** May 2026
+# Lameda — API Specifications
+**Version:** 2.1 | **Base URL:** `https://lameda.vercel.app` | **Date:** June 2026
 
----
-
-## Global Standards (NEW in v2)
-
-### Authentication
-All requests (except auth endpoints) require: `Authorization: Bearer {access_token}`
-
-### Standard Error Envelope
-```json
-{
-  "error": {
-    "code": "RESOURCE_NOT_FOUND",
-    "message": "Order not found",
-    "details": [{"field": "order_id", "message": "Invalid UUID format"}]
-  },
-  "request_id": "01HX..."
-}
-```
-
-Error codes: `UNAUTHORIZED`, `FORBIDDEN`, `RESOURCE_NOT_FOUND`, `VALIDATION_ERROR`, `RATE_LIMIT_EXCEEDED`, `CONFLICT`, `INTERNAL_ERROR`
-
-### Pagination (all list endpoints)
-Request: `?page=1&per_page=20`
-Response:
-```json
-{
-  "data": [...],
-  "meta": { "total": 142, "page": 1, "per_page": 20, "total_pages": 8 }
-}
-```
-
-### Rate Limiting Headers
-All responses include:
-- `X-RateLimit-Limit: 100`
-- `X-RateLimit-Remaining: 87`
-- `X-RateLimit-Reset: 1716912345`
-- On 429: `Retry-After: 60`
-
-### Idempotency
-All POST mutation endpoints require: `Idempotency-Key: {uuid}` header. Duplicate requests with same key return cached response for 24 hours.
+> **v2.1 update:** Reflects actual implemented routes as of Sprint 4. Previous v2.0 described a planned NestJS REST API that was never built. The actual system is a Next.js App Router API with route handlers.
 
 ---
 
 ## Authentication
 
-### POST /api/v1/auth/login
-```json
-// Request
-{ "email": "merchant@example.com", "password": "..." }
+The platform uses two auth models depending on the caller:
 
-// Response 200
-{
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "merchant_id": "uuid",
-  "expires_in": 3600
-}
-```
+| Caller | Auth method | Header |
+|--------|------------|--------|
+| Merchant CRM dashboard | Supabase Auth session (cookie-based) | Managed by Supabase JS SDK |
+| Server-to-server / CRM API | Per-merchant API key | `X-Merchant-Api-Key: <key>` |
+| Cron jobs | Shared cron secret | `Authorization: Bearer <CRON_SECRET>` |
+| Admin endpoints | Shared admin secret | `x-admin-secret: <ADMIN_SECRET>` |
+| Webhook receivers (Telegram) | HMAC-SHA256 signed by `TELEGRAM_WEBHOOK_SECRET` | `X-Telegram-Bot-Api-Secret-Token` |
+| Webhook receivers (Paystack) | HMAC-SHA512 signed by `PAYSTACK_WEBHOOK_SECRET` | `X-Paystack-Signature` |
+| Webhook receivers (order-delivered) | Shared webhook secret | `x-webhook-secret` |
 
-### POST /api/v1/auth/refresh (NEW)
-```json
-// Request
-{ "refresh_token": "eyJ..." }
-
-// Response 200
-{ "access_token": "eyJ...", "expires_in": 3600 }
-```
-
-### POST /api/v1/auth/logout (NEW)
-- Header: `Authorization: Bearer {token}`
-- Response: `204 No Content`
+> There is no custom JWT auth system. JWT handling is fully delegated to Supabase Auth.
 
 ---
 
-## Merchants
+## Standard Error Envelope
 
-### POST /api/v1/merchants
 ```json
-// Request
-{ "name": "Dayo", "email": "dayo@example.com", "password": "...", "phone": "+2348012345678" }
-
-// Response 201
-{ "id": "uuid", "email": "...", "trial_ends_at": "...", "subscription_status": "trial" }
-```
-
-### GET /api/v1/merchants/{merchant_id}
-Returns merchant profile + channels + plan status.
-
-### PUT /api/v1/merchants/{merchant_id}
-```json
-{ "persona_name": "Amaka", "language": "pcm", "business_hours": {...}, "delivery_policy": "..." }
-```
-
-### GET /api/v1/merchants/{merchant_id}/subscription (NEW)
-```json
-// Response 200
 {
-  "plan": "Growth",
-  "status": "active",
-  "trial_ends_at": null,
-  "conversation_usage": 347,
-  "conversation_limit": 2000,
-  "current_period_ends_at": "2026-06-01T00:00:00Z"
+  "error": "MERCHANT_NOT_FOUND",
+  "details": "No merchant found with that API key"
 }
+```
+
+HTTP status codes: `400` (validation), `401` (missing auth), `403` (wrong secret), `404` (not found), `409` (conflict), `429` (rate limited), `500` (internal error).
+
+---
+
+## Global Standards
+
+- Money values: always in **kobo** (1 NGN = 100 kobo) — never floats
+- All IDs: UUID v4
+- Timestamps: ISO 8601 UTC (`2026-06-12T14:23:00.000Z`)
+- PII fields: decrypted transparently by the server before returning to CRM callers; never return ciphertext to the client
+
+---
+
+## Merchant Onboarding
+
+### POST /api/merchants/register
+
+Self-service merchant registration. Creates merchant row + Supabase Auth account + sends welcome email with credentials.
+
+**Auth:** None (public endpoint)
+
+**Request body:**
+```json
+{
+  "business_name": "Adire Lagos",
+  "owner_name": "Amaka Obi",
+  "email": "amaka@adirelags.com",
+  "business_type": "fashion",
+  "telegram_bot_token": "7123456789:AAF...",
+  "whatsapp_number": "+2348012345678"  // optional
+}
+```
+
+`business_type` enum: `fashion | food | electronics | beauty | services | general`
+
+**Response 201:**
+```json
+{
+  "merchant_id": "uuid",
+  "api_key": "lmd_...",
+  "message": "Merchant registered. Check email for login credentials."
+}
+```
+
+**Side effects on success:**
+- Merchant row inserted with encrypted PII
+- Supabase Auth user created with temporary password
+- Telegram webhook registered at `/api/webhook/telegram/{merchant_id}`
+- Welcome email sent via Resend (includes login URL + bot setup instructions)
+- API key generated and stored
+
+**Error cases:**
+- `409` — email already registered
+- `422` — invalid Telegram bot token (validated against Telegram API)
+- `400` — validation failure (Zod schema)
+
+---
+
+### POST /api/merchants/rotate-token
+
+Rotate a merchant's Telegram bot token. Re-registers the webhook with the new token.
+
+**Auth:** `X-Merchant-Api-Key`
+
+**Request body:**
+```json
+{ "telegram_bot_token": "7987654321:AAG..." }
+```
+
+**Response 200:**
+```json
+{ "message": "Token rotated and webhook re-registered." }
 ```
 
 ---
 
 ## Products
 
-### POST /api/v1/products
+### POST /api/products/import
+
+CSV bulk product import. Validates row by row, imports valid rows.
+
+**Auth:** `X-Merchant-Api-Key`
+
+**Request:** `multipart/form-data` with `file` field (CSV)
+
+**CSV columns:** `name` (required), `description`, `price` (NGN — converted to kobo), `category`, `image_url`, `stock_count`, `sizes` (pipe-separated), `colors` (pipe-separated)
+
+**Response 200:**
 ```json
-// Request (Idempotency-Key required)
-{ "name": "Ankara Top", "description": "...", "price": 1850000, "category": "tops", "stock_qty": 12 }
-
-// Response 201
-{ "id": "uuid", "name": "Ankara Top", "price": 1850000, "sku": "ANK-001", ... }
-```
-
-### GET /api/v1/products
-`?category=tops&status=active&page=1&per_page=20`
-Returns paginated product list.
-
-### GET /api/v1/products/{product_id}
-Returns product + variants + image URLs.
-
-### PUT /api/v1/products/{product_id}
-Updates product fields.
-
-### POST /api/v1/products/{product_id}/images
-`multipart/form-data` - up to 5 images, max 5MB each.
-Response: `{ "image_url": "https://...", "embedding_queued": true }`
-
-### POST /api/v1/products/bulk-import
-`multipart/form-data: csv_file`
-Response: `{ "imported": 47, "failed": 3, "errors": [{"row": 12, "reason": "Missing price"}] }`
-
-### POST /api/v1/products/search (NEW - NLP semantic search)
-```json
-// Request
-{ "query": "blue party dress under 20k", "merchant_id": "uuid", "limit": 5 }
-
-// Response 200
 {
-  "results": [
-    { "product": {...}, "score": 0.92, "match_reason": "color + price + category" }
-  ]
-}
-```
-Uses pgvector cosine similarity + text re-ranking. Min score threshold: 0.6.
-
-### POST /api/v1/products/image-match (NEW - CLIP visual search)
-`multipart/form-data: image` + body: `{ "merchant_id": "uuid" }`
-```json
-// Response 200
-{
-  "results": [
-    { "product": {...}, "similarity_score": 0.88 }
+  "imported": 47,
+  "skipped": 3,
+  "errors": [
+    { "row": 12, "error": "price must be a positive number" }
   ]
 }
 ```
 
 ---
 
-## Conversations
+### POST /api/products/[productId]/embed
 
-### POST /api/v1/conversations
+Generate and store OpenAI embedding for a single product.
+
+**Auth:** `X-Merchant-Api-Key`
+
+**Response 200:**
 ```json
-// Request (Idempotency-Key required)
-{ "customer_id": "uuid", "channel_type": "whatsapp" }
-
-// Response 201
-{ "id": "uuid", "status": "active", "context_json": {} }
-```
-
-### GET /api/v1/conversations/{id}
-Returns conversation + paginated messages (`?page=1&per_page=50`).
-
-### POST /api/v1/conversations/{id}/messages
-```json
-{ "sender_type": "customer", "message_type": "text", "body_text": "Do you have size M?" }
-```
-
-### GET /api/v1/conversations/handoffs (NEW)
-`?status=waiting_human&page=1&per_page=20`
-Returns paginated list of conversations needing human attention.
-
-### PUT /api/v1/conversations/{id}/handoff (NEW)
-```json
-// Request - merchant takes over
-{ "action": "take_over" }          // or "assign", "snooze", "resume_ai"
-// Response 200
-{ "status": "human_active", "assigned_to": "merchant_id" }
-```
-
-### GET /api/v1/conversations/{id}/memory (NEW)
-Returns AI-generated summary of customer preferences and history.
-
-### PUT /api/v1/conversations/{id}/memory (NEW)
-Allows merchant to add notes to customer memory (persisted to customer_preferences).
-
----
-
-## Orders
-
-### POST /api/v1/orders
-```json
-// Request (Idempotency-Key required)
-{
-  "customer_id": "uuid",
-  "conversation_id": "uuid",
-  "items": [{ "product_id": "uuid", "variant_id": "uuid", "quantity": 1 }],
-  "delivery_address": { "street": "...", "city": "Lagos", "state": "Lagos" }
-}
-// Response 201 - order created with status "pending"
-```
-
-### GET /api/v1/orders
-`?status=pending&page=1&per_page=20` - Returns merchant's orders.
-
-### GET /api/v1/orders/{order_id}
-Returns full order + items + payment status.
-
-### PUT /api/v1/orders/{order_id}/status
-```json
-{ "status": "dispatched", "tracking_info": "..." }
-```
-
-### POST /api/v1/orders/{order_id}/refund (NEW)
-```json
-{ "reason": "Customer returned item", "amount": 1850000 }
-// Triggers Paystack refund + updates payment record
+{ "product_id": "uuid", "embedded": true }
 ```
 
 ---
 
-## Payments
+### POST /api/products/embed-all
 
-### POST /api/v1/payments/initiate
+Bulk re-embed entire merchant catalogue. Skips products that already have an embedding.
+
+**Auth:** `X-Merchant-Api-Key` (or legacy `MERCHANT_API_KEY` env var — to be retired)
+
+**Response 200:**
 ```json
-// Request (Idempotency-Key required)
-{ "order_id": "uuid", "provider": "paystack" }
-
-// Response 201
-{
-  "payment_id": "uuid",
-  "checkout_url": "https://checkout.paystack.com/xxx",
-  "reference": "LMD-2847-1716912345",
-  "expires_at": "2026-05-22T14:30:00Z"
-}
+{ "embedded": 42, "skipped": 5, "errors": 0 }
 ```
-
-### GET /api/v1/payments/{payment_id}
-Returns payment status + provider response.
 
 ---
 
-## Broadcasts
+## CRM
 
-### POST /api/v1/broadcasts
+### GET /api/crm/customers
+
+Paginated customer list. PII fields (display_name) are transparently decrypted before returning.
+
+**Auth:** `X-Merchant-Api-Key`
+
+**Query params:**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `limit` | int | 50 | Max rows (max 100) |
+| `offset` | int | 0 | Pagination offset |
+| `opted_in` | bool | — | Filter by opt-in status |
+
+**Response 200:**
 ```json
 {
-  "name": "June Flash Sale",
-  "message_text": "...",
-  "audience_filter": { "tags": ["vip"], "last_order_days": 90 },
-  "scheduled_at": "2026-06-01T09:00:00Z"
-}
-// Response 201 with estimated recipient_count
-```
-
-### GET /api/v1/broadcasts
-`?status=sent&page=1` - Returns broadcast list.
-
-### POST /api/v1/broadcasts/{id}/schedule (NEW)
-`{ "scheduled_at": "2026-06-01T09:00:00Z" }` - Schedules or reschedules broadcast.
-
----
-
-## Analytics
-
-### GET /api/v1/analytics/summary (NEW)
-`?from=2026-05-01&to=2026-05-31`
-```json
-{
-  "revenue": 1425000,
-  "orders_completed": 87,
-  "conversations_started": 312,
-  "conversion_rate": 0.279,
-  "avg_order_value": 16379,
-  "handoff_rate": 0.043,
-  "abandoned_cart_recovery_rate": 0.28
+  "customers": [
+    {
+      "id": "uuid",
+      "phone_number": "5012345678",
+      "display_name": "Tunde Adeleke",
+      "opted_in": true,
+      "opted_in_at": "2026-05-01T10:00:00Z",
+      "language_preference": "en",
+      "created_at": "2026-04-28T08:00:00Z"
+    }
+  ],
+  "total": 143,
+  "limit": 50,
+  "offset": 0
 }
 ```
 
 ---
 
-## NDPR / Compliance
+### GET /api/crm/orders
 
-### DELETE /api/v1/customers/{customer_id}/data (NEW - Right to Erasure)
-- Requires merchant authorization
-- Anonymises PII within 72 hours (per NDPR requirement)
-- Returns: `{ "erasure_requested_at": "...", "estimated_completion": "..." }`
-- Audit log entry created automatically
+Paginated order list. `delivery_address` is transparently decrypted before returning.
+
+**Auth:** `X-Merchant-Api-Key`
+
+**Query params:**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `status` | string | — | Filter: `pending\|confirmed\|paid\|shipped\|delivered\|cancelled` |
+| `limit` | int | 50 | Max rows (max 100) |
+| `offset` | int | 0 | Pagination offset |
+
+**Response 200:**
+```json
+{
+  "orders": [
+    {
+      "id": "uuid",
+      "reference": "LMD-20260607-A3F2",
+      "status": "paid",
+      "total_kobo": 7500000,
+      "delivery_address": "14 Bode Thomas Street, Surulere, Lagos",
+      "delivery_method": "delivery",
+      "line_items": [
+        { "product_id": "uuid", "name": "Adire Shirt (XL, Blue)", "price_kobo": 7500000, "qty": 1 }
+      ],
+      "customer_phone": "5012345678",
+      "created_at": "2026-06-07T09:30:00Z"
+    }
+  ],
+  "total": 28,
+  "limit": 50,
+  "offset": 0
+}
+```
 
 ---
 
-## Webhooks (Inbound)
+### POST /api/crm/reveal-token
 
-### POST /api/webhooks/v1/whatsapp
-- Signed with HMAC-SHA512 using `X-Hub-Signature-256` header
-- Deduplicated via `idempotency_key` in webhook_events table
-- Retry policy: 3 retries with exponential backoff (1s, 4s, 16s)
+Audit-gated bot token reveal. Rate limited (3 requests per 24 hours per merchant). Logs to `audit_logs`.
 
-### POST /api/webhooks/v1/paystack
-- Verified via Paystack secret key in `X-Paystack-Signature`
-- Events handled: `charge.success`, `refund.processed`
+**Auth:** `X-Merchant-Api-Key`
 
-### GET /api/v1/webhooks/health (NEW)
-Returns last 10 webhook events with status - for merchant debugging.
+**Response 200:**
+```json
+{ "telegram_bot_token": "7123456789:AAF..." }
+```
+
+**Response 429:**
+```json
+{ "error": "RATE_LIMIT_EXCEEDED", "details": "Token reveal limited to 3 requests per 24 hours." }
+```
+
+---
+
+## Webhooks
+
+### POST /api/webhook/telegram/[merchantId]
+
+Receives Telegram Update objects for a specific merchant bot. Per-merchant endpoint — each merchant bot is pointed to their own URL.
+
+**Auth:** `X-Telegram-Bot-Api-Secret-Token: <TELEGRAM_WEBHOOK_SECRET>` (verified by Lameda; set when registering the webhook)
+
+**Body:** Telegram `Update` object (application/json)
+
+**Response 200:** `{ "ok": true }` — always ACKs quickly; processing is synchronous but fast
+
+**Flow:**
+1. Verify secret token
+2. Parse update type (message / callback_query)
+3. Upsert customer row
+4. Load or create conversation
+5. Route to state machine handler
+6. Send Telegram reply
+7. Persist conversation state
+
+---
+
+### POST /api/webhook/whatsapp
+
+WhatsApp Cloud API webhook receiver. Currently a stub — Termii/WhatsApp integration is planned for a future sprint.
+
+**Auth:** WhatsApp HMAC-SHA256 signature verification
+
+**Response 200:** ACK (no processing implemented)
+
+---
+
+### POST /api/webhooks/paystack
+
+Paystack `charge.success` webhook handler.
+
+**Auth:** `X-Paystack-Signature` (HMAC-SHA512 of body with `PAYSTACK_WEBHOOK_SECRET`)
+
+**Body:** Paystack webhook event object
+
+**Flow on `charge.success`:**
+1. Verify HMAC signature
+2. Idempotency check via `webhook_events` table
+3. Update `payments.status = 'success'`, `paid_at = now()`
+4. Update `orders.status = 'confirmed'`
+5. Restore reserved stock
+6. Send Telegram confirmation to customer
+7. Send Telegram notification to merchant admin
+
+---
+
+### POST /api/webhooks/order-delivered
+
+Supabase Database Webhook — fires when `orders.status` changes to `'delivered'`. Sends delivery confirmation message to customer via Telegram.
+
+**Auth:** `x-webhook-secret` header
+
+---
+
+## Cron Jobs
+
+### POST /api/cron/cart-recovery
+
+Abandoned cart recovery. Sends nudge messages for carts idle > 15 min (message 1) or > 2 hours (message 2).
+
+**Auth:** `Authorization: Bearer <CRON_SECRET>`
+
+**Schedule:** Every 5 minutes (configured in `vercel.json`)
+
+**Response 200:**
+```json
+{ "sent_1": 3, "sent_2": 1 }
+```
+
+---
+
+### POST /api/cron/payment-expiry
+
+Expires unpaid Paystack payment links older than 30 minutes. Restores reserved stock. Updates payment status to `failed`.
+
+**Auth:** `Authorization: Bearer <CRON_SECRET>`
+
+**Schedule:** Every 5 minutes (configured in `vercel.json`)
+
+**Response 200:**
+```json
+{ "expired": 2 }
+```
+
+---
+
+## Admin
+
+### POST /api/admin/merchants/resend-welcome
+
+Reset a merchant's Supabase Auth password and resend the welcome email. Used when a merchant loses access or onboarding email was not received.
+
+**Auth:** `x-admin-secret: <ADMIN_SECRET>`
+
+**Request body:**
+```json
+{ "merchant_id": "uuid" }
+```
+
+**Response 200:**
+```json
+{ "message": "Password reset and welcome email resent." }
+```
+
+---
+
+## Health
+
+### GET /api/health
+
+Liveness check. Tests DB connectivity.
+
+**Auth:** None
+
+**Response 200:**
+```json
+{ "status": "ok", "db": "connected", "timestamp": "2026-06-12T14:00:00Z" }
+```
+
+**Response 503:**
+```json
+{ "status": "error", "db": "unreachable" }
+```
+
+---
+
+## Test (Dev Only)
+
+### POST /api/test/payment-link
+
+Generate a short-lived Paystack payment link for a test order. Only available in non-production environments.
+
+**Auth:** `Authorization: Bearer <CRON_SECRET>`
+
+---
+
+## Rate Limiting
+
+Rate limiting is enforced at the application layer using a DB-backed counter (serverless-safe — no Redis required in current architecture).
+
+| Endpoint | Limit |
+|----------|-------|
+| `/api/crm/reveal-token` | 3 requests / 24h per merchant |
+| `/api/merchants/register` | 10 requests / hour per IP |
+| Telegram webhook handler | 30 messages / minute per customer |
+
+---
+
+## Money Representation
+
+All monetary values in API responses are in **kobo** (integer). Divide by 100 for NGN display.
+
+```
+7_500_000 kobo = ₦75,000.00
+```
+
+Never store or transmit money as a float.

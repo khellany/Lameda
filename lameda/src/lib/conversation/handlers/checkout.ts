@@ -323,6 +323,25 @@ export async function handleConfirmOrder(ctx: ConversationContext): Promise<Hand
 
     if (error || !order) throw new Error(error?.message ?? 'Order insert failed')
 
+    // Reserve stock for each line item (STORY-031).
+    // Read-then-write is not atomic but is acceptable for MVP concurrency levels.
+    // Replace with a Postgres RPC (decrement_stock) if race conditions appear at scale.
+    for (const item of ctx.cart.items) {
+      if (!item.productId || !item.quantity) continue
+      const { data: product } = await supabase
+        .from('products')
+        .select('stock_count')
+        .eq('id', item.productId)
+        .single()
+      // null stock_count = unlimited — skip reservation
+      if (product && product.stock_count !== null) {
+        await supabase
+          .from('products')
+          .update({ stock_count: Math.max(0, product.stock_count - item.quantity) })
+          .eq('id', item.productId)
+      }
+    }
+
     const isMockMode = process.env.PAYMENT_MOCK === 'true'
 
     // ── MOCK PAYMENT MODE ─────────────────────────────────────────
@@ -523,6 +542,23 @@ export async function handleChangeAddressAfterConfirm(ctx: ConversationContext):
   if (order?.status === 'confirmed') {
     await supabase.from('orders').update({ status: 'cancelled' }).eq('id', orderId)
     await supabase.from('payments').update({ status: 'failed' }).eq('order_id', orderId)
+
+    // Restore reserved stock (mirrors payment-expiry cron logic)
+    const lineItemsForStock = (order.line_items ?? []) as unknown as Array<{ productId: string; quantity: number }>
+    for (const item of lineItemsForStock) {
+      if (!item.productId || !item.quantity) continue
+      const { data: product } = await supabase
+        .from('products')
+        .select('stock_count')
+        .eq('id', item.productId)
+        .single()
+      if (product && product.stock_count !== null) {
+        await supabase
+          .from('products')
+          .update({ stock_count: product.stock_count + item.quantity })
+          .eq('id', item.productId)
+      }
+    }
 
     // Restore cart items from the cancelled order so the customer doesn't re-shop
     const lineItems = (order.line_items ?? []) as unknown as import('../types').CartItem[]

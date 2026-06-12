@@ -14,6 +14,8 @@ import {
   handleAdminHelp,
   handleListProducts,
   handleOrdersSummary,
+  handleDispatchOrder,
+  handleCancelOrderByRef,
   startAddProduct,
   startUpdateStock,
   continueAdminFlow,
@@ -289,6 +291,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             break
           case '/orders':
             result = await handleOrdersSummary(args, botToken, message.from, merchant.id, convState, convCart)
+            break
+          case '/dispatch':
+            result = await handleDispatchOrder(args[0] ?? '', botToken, message.from, merchant.id, convState, convCart)
+            break
+          case '/cancelorder':
+            result = await handleCancelOrderByRef(args[0] ?? '', botToken, message.from, merchant.id, convState, convCart)
             break
           default:
             result = await handleAdminHelp(botToken, message.from, convState, convCart)

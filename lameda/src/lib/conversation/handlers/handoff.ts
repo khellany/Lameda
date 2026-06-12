@@ -1,5 +1,5 @@
 /**
- * Human handoff handler (STORY-021).
+ * Human handoff handler (STORY-023).
  *
  * Triggered when:
  *   a) Customer explicitly asks for a human ("talk to someone", "speak to agent")
@@ -7,14 +7,12 @@
  *
  * What happens:
  *   1. Customer receives a warm "connecting you now" message
- *   2. Conversation status set to 'waiting_human' in DB
- *   3. Handoff record created in conversations table for merchant dashboard pickup
- *
- * The merchant dashboard (Sprint 7) will display waiting_human conversations
- * via Supabase Realtime. Until then, merchants see them in the DB directly.
+ *   2. Conversation status set to 'idle' + current_intent flagged as 'handoff:{reason}'
+ *      (Sprint 7 dashboard will filter on current_intent to show handoff queue)
+ *   3. Merchant admin is notified via Telegram to their admin_telegram_chat_id
  */
 
-import { sendButtonsMessage } from '@/lib/telegram/client'
+import { sendButtonsMessage, sendTextMessage } from '@/lib/telegram/client'
 import { createAdminClient } from '@/lib/supabase/server'
 import { logger } from '@/lib/utils/logger'
 import type { ConversationContext, HandlerResult } from '../types'
@@ -25,11 +23,11 @@ export async function handleHumanHandoff(
 ): Promise<HandlerResult> {
   const supabase = createAdminClient()
 
-  // Mark conversation as waiting for human in DB
+  // Step 1: Mark conversation as handoff-pending in DB
   await supabase
     .from('conversations')
     .update({
-      status: 'idle', // closest to 'waiting_human' in current enum
+      status: 'idle',
       current_intent: `handoff:${reason}`,
       last_message_at: new Date().toISOString(),
     })
@@ -40,6 +38,32 @@ export async function handleHumanHandoff(
     'Human handoff triggered',
   )
 
+  // Step 2: Notify merchant admin via Telegram
+  const { data: merchant } = await supabase
+    .from('merchants')
+    .select('admin_telegram_chat_id, business_name')
+    .eq('id', ctx.merchantId)
+    .single()
+
+  if (merchant?.admin_telegram_chat_id) {
+    const reasonLabel =
+      reason === 'low_confidence'
+        ? 'AI confidence too low'
+        : 'Customer requested human support'
+
+    const adminAlert =
+      `🚨 *Customer needs human support*\n\n` +
+      `Reason: _${reasonLabel}_\n` +
+      `Store: *${merchant.business_name ?? 'Your store'}*\n\n` +
+      `Reply to this customer in your bot to take over the conversation.`
+
+    await sendTextMessage(ctx.botToken, merchant.admin_telegram_chat_id, adminAlert).catch(err => {
+      // Non-fatal: log but don't block the customer-facing response
+      logger.warn({ err, merchantId: ctx.merchantId }, 'Failed to send handoff alert to merchant admin')
+    })
+  }
+
+  // Step 3: Send customer-facing warm handoff message
   const msg =
     reason === 'low_confidence'
       ? `I want to make sure you get the best help here. 🙏\n\n` +

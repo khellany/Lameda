@@ -13,6 +13,8 @@
  *   /addproduct            — Multi-step guided product creation
  *   /updatestock           — Multi-step stock quantity update
  *   /orders [status]       — Recent orders summary
+ *   /dispatch <ref>        — Mark order as shipped, notify customer (STORY-030)
+ *   /cancelorder <ref>     — Cancel order, restore stock, notify customer (STORY-030)
  *
  * Multi-step flows (/addproduct, /updatestock) persist state in
  * ConversationState.adminFlow. The webhook handler calls continueAdminFlow()
@@ -25,7 +27,7 @@
  *     cross-merchant data access
  */
 
-import { sendTextMessage } from '@/lib/telegram/client'
+import { sendTextMessage, sendButtonsMessage } from '@/lib/telegram/client'
 import { createAdminClient } from '@/lib/supabase/server'
 import { formatNaira } from '@/lib/ai/respond'
 import { logger } from '@/lib/utils/logger'
@@ -112,12 +114,16 @@ export async function handleAdminHelp(
 ): Promise<HandlerResult> {
   const msg =
     `🛠 *Admin Commands*\n\n` +
-    `/listproducts — View all products with stock levels\n` +
+    `📦 *Products*\n` +
+    `/listproducts — View all products with stock\n` +
     `/listproducts 2 — Page 2\n` +
     `/addproduct — Add a new product (guided)\n` +
-    `/updatestock — Update stock for a product\n` +
+    `/updatestock — Update stock quantity\n\n` +
+    `🧾 *Orders*\n` +
     `/orders — View recent orders\n` +
-    `/orders pending — Filter by status\n\n` +
+    `/orders paid — Filter by status\n` +
+    `/dispatch LMD-ABC — Mark order as shipped\n` +
+    `/cancelorder LMD-ABC — Cancel an order\n\n` +
     `_Status options: pending, confirmed, paid, shipped, delivered, cancelled_\n\n` +
     `Send "cancel" at any time to exit a multi-step flow.`
 
@@ -543,4 +549,171 @@ async function stepStockQuantity(
     newCart: cart,
     replySent: `Stock updated — ${productName}: ${displayStock}`,
   }
+}
+
+// ── /dispatch <reference> ──────────────────────────────────────────────────
+
+/**
+ * Marks a paid order as shipped and notifies the customer (STORY-030).
+ * Only paid orders can be dispatched — prevents dispatching unpaid orders.
+ */
+export async function handleDispatchOrder(
+  reference: string,
+  botToken: string,
+  chatId: string,
+  merchantId: string,
+  state: ConversationState,
+  cart: Cart,
+): Promise<HandlerResult> {
+  if (!reference) {
+    const usage = `Usage: /dispatch <order_reference>\nExample: /dispatch LMD-ABC123`
+    await sendTextMessage(botToken, chatId, usage)
+    return { newState: state, newCart: cart, replySent: 'Missing reference' }
+  }
+
+  const supabase = createAdminClient()
+  const ref = reference.toUpperCase()
+
+  const { data: order } = await supabase
+    .from('orders')
+    .select('id, reference, status, total_kobo, customer_id')
+    .eq('reference', ref)
+    .eq('merchant_id', merchantId)
+    .maybeSingle()
+
+  if (!order) {
+    const msg = `❌ Order *${ref}* not found for your store.`
+    await sendTextMessage(botToken, chatId, msg)
+    return { newState: state, newCart: cart, replySent: 'Order not found' }
+  }
+
+  if (order.status !== 'paid') {
+    const msg =
+      `⚠️ Order *${order.reference}* is currently *${order.status}*.\n\n` +
+      `Only paid orders can be dispatched.`
+    await sendTextMessage(botToken, chatId, msg)
+    return { newState: state, newCart: cart, replySent: `Cannot dispatch — status: ${order.status}` }
+  }
+
+  await supabase.from('orders').update({ status: 'shipped' }).eq('id', order.id)
+  logger.info({ orderId: order.id, ref: order.reference, merchantId }, 'Order dispatched by admin')
+
+  const adminMsg =
+    `✅ *Order Dispatched!*\n\n` +
+    `Reference: \`${order.reference}\`\n` +
+    `Total: ${formatNaira(order.total_kobo)}\n\n` +
+    `Status updated to *Shipped*. Customer has been notified.`
+  await sendTextMessage(botToken, chatId, adminMsg)
+
+  // Notify the customer via their Telegram chat ID (stored in phone_number)
+  const { data: customer } = await supabase
+    .from('customers')
+    .select('phone_number')
+    .eq('id', order.customer_id)
+    .single()
+
+  if (customer?.phone_number) {
+    const customerMsg =
+      `🚚 *Your order is on its way!*\n\n` +
+      `Reference: \`${order.reference}\`\n\n` +
+      `Your order has been dispatched and is heading to you. ` +
+      `You'll receive it soon! 🎉`
+    await sendButtonsMessage(botToken, customer.phone_number, customerMsg, [
+      { id: 'order_status', title: '📦 Track Order' },
+    ])
+  }
+
+  return { newState: state, newCart: cart, replySent: adminMsg }
+}
+
+// ── /cancelorder <reference> ───────────────────────────────────────────────
+
+/**
+ * Cancels an order by reference, restores reserved stock, and notifies the customer.
+ * Works on any non-terminal order status (not already cancelled or delivered).
+ */
+export async function handleCancelOrderByRef(
+  reference: string,
+  botToken: string,
+  chatId: string,
+  merchantId: string,
+  state: ConversationState,
+  cart: Cart,
+): Promise<HandlerResult> {
+  if (!reference) {
+    const usage = `Usage: /cancelorder <order_reference>\nExample: /cancelorder LMD-ABC123`
+    await sendTextMessage(botToken, chatId, usage)
+    return { newState: state, newCart: cart, replySent: 'Missing reference' }
+  }
+
+  const supabase = createAdminClient()
+  const ref = reference.toUpperCase()
+
+  const { data: order } = await supabase
+    .from('orders')
+    .select('id, reference, status, total_kobo, customer_id, line_items')
+    .eq('reference', ref)
+    .eq('merchant_id', merchantId)
+    .maybeSingle()
+
+  if (!order) {
+    const msg = `❌ Order *${ref}* not found for your store.`
+    await sendTextMessage(botToken, chatId, msg)
+    return { newState: state, newCart: cart, replySent: 'Order not found' }
+  }
+
+  if (['cancelled', 'delivered'].includes(order.status)) {
+    const msg = `⚠️ Order *${order.reference}* is already *${order.status}* and cannot be cancelled.`
+    await sendTextMessage(botToken, chatId, msg)
+    return { newState: state, newCart: cart, replySent: `Cannot cancel — status: ${order.status}` }
+  }
+
+  await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id)
+
+  // Restore reserved stock for each line item
+  type LineItem = { productId: string; quantity: number }
+  const lineItems = (order.line_items ?? []) as unknown as LineItem[]
+  for (const item of lineItems) {
+    if (!item.productId || !item.quantity) continue
+    const { data: product } = await supabase
+      .from('products')
+      .select('stock_count')
+      .eq('id', item.productId)
+      .single()
+    if (product && product.stock_count !== null) {
+      await supabase
+        .from('products')
+        .update({ stock_count: product.stock_count + item.quantity })
+        .eq('id', item.productId)
+    }
+  }
+
+  logger.info({ orderId: order.id, ref: order.reference, merchantId }, 'Order cancelled by admin')
+
+  const adminMsg =
+    `✅ *Order Cancelled*\n\n` +
+    `Reference: \`${order.reference}\`\n` +
+    `Total: ${formatNaira(order.total_kobo)}\n\n` +
+    `Stock has been restored. Customer has been notified.`
+  await sendTextMessage(botToken, chatId, adminMsg)
+
+  // Notify the customer
+  const { data: customer } = await supabase
+    .from('customers')
+    .select('phone_number')
+    .eq('id', order.customer_id)
+    .single()
+
+  if (customer?.phone_number) {
+    const customerMsg =
+      `❌ *Order Cancelled — ${order.reference}*\n\n` +
+      `Your order has been cancelled.\n\n` +
+      `If you have any questions, please reach out to us.`
+    await sendButtonsMessage(botToken, customer.phone_number, customerMsg, [
+      { id: 'support', title: '💬 Contact Support' },
+      { id: 'browse_all', title: '🛍 Shop Again' },
+    ])
+  }
+
+  return { newState: state, newCart: cart, replySent: adminMsg }
 }

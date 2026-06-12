@@ -32,7 +32,12 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { generateTextEmbedding, buildProductTextContent } from '@/lib/ai/embed'
 import { logger } from '@/lib/utils/logger'
 
-const MAX_ROWS = 100 // Starter plan limit; enforce per plan in future
+// Per-plan import limits (TD-002 — wired to subscription_tier)
+const PLAN_ROW_LIMITS: Record<string, number> = {
+  starter: 100,
+  growth: 500,
+  pro: Infinity,
+}
 
 // ----------------------------------------------------------------
 // Route handler
@@ -41,13 +46,14 @@ const MAX_ROWS = 100 // Starter plan limit; enforce per plan in future
 export async function POST(request: NextRequest) {
   const supabase = createAdminClient()
   let merchantId: string | null = null
+  let subscriptionTier = 'starter'
 
   // Auth: per-merchant API key (preferred — generated during onboarding)
   const merchantApiKey = request.headers.get('x-merchant-api-key')
   if (merchantApiKey) {
     const { data: merchant } = await supabase
       .from('merchants')
-      .select('id')
+      .select('id, subscription_tier')
       .eq('api_key', merchantApiKey)
       .eq('is_active', true)
       .maybeSingle()
@@ -56,6 +62,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid API key' }, { status: 401 })
     }
     merchantId = merchant.id
+    subscriptionTier = merchant.subscription_tier ?? 'starter'
   } else {
     // Legacy: shared env-var key + explicit merchant ID
     const legacyMerchantId = request.headers.get('x-merchant-id')
@@ -73,6 +80,8 @@ export async function POST(request: NextRequest) {
   if (!merchantId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  const MAX_ROWS = PLAN_ROW_LIMITS[subscriptionTier] ?? PLAN_ROW_LIMITS.starter
 
   // Read body as text
   const body = await request.text()

@@ -1,424 +1,555 @@
-# Lameda - Database Schema v2
-**Version:** 2.0 | **Date:** May 2026 | **Engine:** PostgreSQL 15 + pgvector + Supabase RLS
+# Lameda — Database Schema
+**Version:** 2.1 | **Date:** June 2026 | **Engine:** PostgreSQL 15 + pgvector + Supabase
+
+> **v2.1 update:** This document now reflects the actual database state as of migration 013. Previous v2.0 described a planned schema that diverged from the implementation in column names, table structure, and auth model. The authoritative migration source is `lameda/supabase/migrations/`.
 
 ---
 
-## Changelog from v1
-- Added `subscription_plans` table
-- Added `product_embeddings` table (CLIP vectors via pgvector)
-- Added `webhook_events` table (idempotency + retry tracking)
-- Added `audit_logs` table (NDPR compliance)
-- Added `customer_preferences` table (replaces flat memory_json)
-- Added `conversation_id` FK to `orders`
-- Added `idempotency_key` to `payments`
-- Added `embedding_version` to `products`
-- Added all missing indexes (GIN, ivfflat, composite)
+## Schema Decisions: Dropped for MVP, Future State Planned
+
+These schema choices were simplified due to resource constraints. Each has a planned future state.
+
+| Ref | Original design | Shipped instead | Reason dropped | Future state |
+|-----|----------------|-----------------|----------------|-------------|
+| RD-008 | `subscription_plans` table — dynamic plan definitions with price and feature flags | `subscription_tier` enum on `merchants` | 3 static tiers need no dynamic config at MVP. A table adds migration overhead with zero product benefit now. | Restore as a seeded table when plan pricing or feature flags need to change without a code deploy. |
+| RD-009 | `customer_preferences` table — language, preferred sizes, colors, AI conversation summaries | `customers.metadata JSONB` | Separate table adds a JOIN on every conversation load. JSONB is schema-flexible at < 10K customers. | Materialise as a normalised table in Sprint 7–8 when building preference-based recommendations and reorder nudges. |
+| RD-010 | `order_items` table — normalised line items with product FK | `orders.line_items JSONB` | Avoids JOIN on every order read. JSONB is an atomic snapshot — historical order accuracy preserved even when product prices change. | Add `order_items` for product-level analytics (top-selling SKU, revenue by category). Needed before any BI integration. |
+| RD-003 | `product_embeddings.embedding vector(512)` — CLIP ViT-B/32 image vectors | `vector(1536)` — OpenAI text-embedding-3-small | CLIP requires a separate inference endpoint (self-hosted or Replicate). Text embeddings cover 90% of search quality at near-zero cost with no extra infrastructure. | Add `clip_embedding vector(512)` as a second column on `product_embeddings` in Sprint 7–8. Schema already accommodates it. |
+| RD-013 | `merchant_bots` join table — multiple Telegram bots per merchant | `merchants.telegram_bot_token` (single column) | 1:1 merchant:bot covers all MVP merchants. Multi-bot adds routing complexity with no current demand. | Extract to `merchant_bots(id, merchant_id, bot_token, bot_name, webhook_url)` when merchants need channel segmentation. |
 
 ---
 
-## Extensions Required
+## Migration History
+
+| # | File | What it does |
+|---|------|-------------|
+| 001 | `001_initial_schema.sql` | Core tables: merchants, customers, products, product_embeddings, conversations, messages, orders, payments, webhook_events, audit_logs. All enums. NDPR erasure function. |
+| 002 | `002_rls_policies.sql` | Row Level Security policies — every table locked down by merchant_id scope |
+| 003 | `003_add_telegram.sql` | `merchants.telegram_bot_token` (encrypted TEXT) |
+| 004 | `004_product_embeddings.sql` | Drops and recreates product_embeddings with OpenAI 1536-dim vectors. Adds `search_products_by_embedding()` RPC. Adds ivfflat index (lists=50). |
+| 005 | `005_delivery_zones_and_payment_expiry.sql` | `merchant_delivery_zones` table; `merchants.pickup_address`, `merchants.default_delivery_fee_kobo`; `payments.expires_at`; `conversations.cart_recovery_1_sent_at`, `conversations.cart_recovery_2_sent_at` |
+| 006 | `006_product_variants.sql` | `product_variants` table with per-variant stock and UNIQUE NULLS NOT DISTINCT on (product_id, size, color) |
+| 007 | `007_telegram_webhook_source.sql` | Adds `'telegram'` to `webhook_source` enum |
+| 008 | `008_business_type.sql` | `business_type` enum (`fashion\|food\|electronics\|beauty\|services\|general`); `merchants.business_type`, `merchants.merchant_config JSONB` |
+| 009 | `009_merchant_self_service.sql` | `merchants.api_key TEXT UNIQUE`; makes `merchants.whatsapp_number` nullable; index on api_key |
+| 010 | `010_pii_encryption.sql` | `merchants.email_hash TEXT` (HMAC-SHA256 for search); unique index; encrypts email/owner_name/telegram_bot_token/orders.delivery_address/customers.display_name at application layer (enc:v1:… format) |
+| 011 | `011_admin_telegram.sql` | `merchants.admin_telegram_chat_id TEXT` — merchant owner's personal Telegram ID for admin commands |
+| 012 | `012_drop_email_check_constraint.sql` | Drops `merchants_email_check` constraint (rejects AES ciphertext) |
+| 013 | `013_merchant_auth_user.sql` | `merchants.auth_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL` — links merchant row to Supabase Auth account |
+
+---
+
+## Extensions
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS vector;        -- pgvector for CLIP embeddings
-CREATE EXTENSION IF NOT EXISTS pg_trgm;       -- trigram for fuzzy text search
+CREATE EXTENSION IF NOT EXISTS "vector";     -- pgvector: semantic product search
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";   -- fuzzy text search (pidgin spellings)
 ```
 
 ---
 
-## Tables
+## Enums
 
-### merchants
+```sql
+CREATE TYPE subscription_tier    AS ENUM ('starter', 'growth', 'pro');
+CREATE TYPE subscription_status  AS ENUM ('trial', 'active', 'suspended', 'cancelled');
+CREATE TYPE conversation_status  AS ENUM ('active', 'idle', 'closed');
+CREATE TYPE order_status         AS ENUM ('pending', 'confirmed', 'paid', 'shipped', 'delivered', 'cancelled');
+CREATE TYPE payment_status       AS ENUM ('pending', 'success', 'failed', 'refunded');
+CREATE TYPE message_direction    AS ENUM ('inbound', 'outbound');
+CREATE TYPE message_type         AS ENUM ('text', 'image', 'button', 'list', 'template');
+CREATE TYPE webhook_source       AS ENUM ('termii', 'paystack', 'telegram');  -- 'telegram' added in migration 007
+CREATE TYPE webhook_status       AS ENUM ('received', 'processed', 'failed', 'duplicate');
+CREATE TYPE actor_type           AS ENUM ('merchant', 'customer', 'system', 'admin');
+CREATE TYPE delivery_method      AS ENUM ('pickup', 'delivery');
+CREATE TYPE business_type        AS ENUM ('fashion', 'food', 'electronics', 'beauty', 'services', 'general');  -- added migration 008
+```
+
+---
+
+## Utility Function
+
+```sql
+-- Auto-update updated_at on every mutable table
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+---
+
+## Table: merchants
+
+One row per merchant account.
+
+> **PII note:** `email`, `owner_name`, `telegram_bot_token` are AES-256-GCM encrypted at the application layer (format: `enc:v1:<iv_hex>:<ciphertext_hex>`). Use `email_hash` for email lookups. Decrypt via `decryptPii()` in `src/lib/crypto/pii.ts`.
+
 ```sql
 CREATE TABLE merchants (
-  id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name                VARCHAR(255) NOT NULL,
-  email               VARCHAR(255) UNIQUE NOT NULL,
-  phone               VARCHAR(20) UNIQUE NOT NULL,
-  password_hash       VARCHAR(255) NOT NULL,
-  business_name       VARCHAR(255),
-  business_category   VARCHAR(100) DEFAULT 'fashion',
-  persona_name        VARCHAR(100) DEFAULT 'Lameda',
-  language            VARCHAR(10) DEFAULT 'en',           -- en, pcm (Nigerian Pidgin)
-  timezone            VARCHAR(50) DEFAULT 'Africa/Lagos',
-  business_hours      JSONB DEFAULT '{"mon-fri":"09:00-18:00","sat":"10:00-15:00"}',
-  delivery_policy     TEXT,
-  return_policy       TEXT,
-  whatsapp_number     VARCHAR(20),
-  whatsapp_connected  BOOLEAN DEFAULT FALSE,
-  plan_id             UUID REFERENCES subscription_plans(id),
-  trial_ends_at       TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '14 days'),
-  subscription_status VARCHAR(20) DEFAULT 'trial',        -- trial, active, past_due, cancelled
-  ndpr_consent_given  BOOLEAN DEFAULT FALSE,
-  ndpr_consent_at     TIMESTAMPTZ,
-  created_at          TIMESTAMPTZ DEFAULT NOW(),
-  updated_at          TIMESTAMPTZ DEFAULT NOW()
+  id                        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- Identity (PII — encrypted at app layer)
+  business_name             TEXT NOT NULL CHECK (char_length(business_name) BETWEEN 1 AND 200),
+  owner_name                TEXT NOT NULL,               -- enc:v1:...
+  email                     TEXT NOT NULL UNIQUE,        -- enc:v1:... ; use email_hash for search
+  email_hash                TEXT UNIQUE,                 -- HMAC-SHA256 of normalised email (migration 010)
+
+  -- Auth
+  auth_user_id              UUID REFERENCES auth.users(id) ON DELETE SET NULL,  -- migration 013
+  api_key                   TEXT UNIQUE,                 -- lmd_... generated at registration (migration 009)
+
+  -- Telegram (migration 003, 009, 011)
+  telegram_bot_token        TEXT,                        -- enc:v1:... ; decrypted server-side only
+  whatsapp_number           TEXT,                        -- nullable (migration 009); Telegram-first
+  termii_instance_id        TEXT,
+
+  -- Business configuration (migration 008)
+  business_type             business_type NOT NULL DEFAULT 'general',
+  merchant_config           JSONB NOT NULL DEFAULT '{}', -- per-merchant overrides on business_type defaults
+  bot_name                  TEXT NOT NULL DEFAULT 'Lameda',
+  bot_personality           TEXT CHECK (char_length(bot_personality) <= 1000),
+  admin_telegram_chat_id    TEXT,                        -- migration 011: merchant owner's personal Telegram ID
+
+  -- Delivery (migration 005)
+  pickup_address            TEXT,
+  default_delivery_fee_kobo BIGINT NOT NULL DEFAULT 0,
+
+  -- Subscription
+  subscription_tier         subscription_tier NOT NULL DEFAULT 'starter',
+  subscription_status       subscription_status NOT NULL DEFAULT 'trial',
+  trial_ends_at             TIMESTAMPTZ,
+  paystack_customer_code    TEXT,
+
+  -- NDPR
+  ndpr_consent_at           TIMESTAMPTZ,
+
+  is_active                 BOOLEAN NOT NULL DEFAULT TRUE
 );
 
-CREATE INDEX idx_merchants_email ON merchants(email);
-CREATE INDEX idx_merchants_whatsapp ON merchants(whatsapp_number);
-CREATE INDEX idx_merchants_plan ON merchants(plan_id);
+CREATE TRIGGER merchants_updated_at
+  BEFORE UPDATE ON merchants
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX idx_merchants_email_hash   ON merchants(email_hash) WHERE email_hash IS NOT NULL;
+CREATE INDEX idx_merchants_api_key      ON merchants(api_key) WHERE api_key IS NOT NULL;
+CREATE INDEX idx_merchants_auth_user_id ON merchants(auth_user_id) WHERE auth_user_id IS NOT NULL;
 ```
 
-### subscription_plans
+---
+
+## Table: merchant_delivery_zones
+
+*(Added migration 005)*
+
+Merchant-configurable delivery zones. Bot matches customer address against keywords to select fee.
+
 ```sql
-CREATE TABLE subscription_plans (
-  id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name                    VARCHAR(50) NOT NULL,           -- Starter, Growth, Pro
-  monthly_price_ngn       INTEGER NOT NULL,               -- 10000, 15000, 25000
-  conversation_limit      INTEGER,                        -- NULL = unlimited
-  product_limit           INTEGER,                        -- 100, 500, NULL
-  broadcast_limit         INTEGER,                        -- 1000, 5000, NULL per month
-  analytics_retention_days INTEGER DEFAULT 30,
-  human_handoff_enabled   BOOLEAN DEFAULT TRUE,
-  api_access_enabled      BOOLEAN DEFAULT FALSE,
-  whitelabel_enabled      BOOLEAN DEFAULT FALSE,
-  features                JSONB DEFAULT '[]',
-  is_active               BOOLEAN DEFAULT TRUE,
-  created_at              TIMESTAMPTZ DEFAULT NOW()
+CREATE TABLE merchant_delivery_zones (
+  id          UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  merchant_id UUID    NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  zone_name   TEXT    NOT NULL,
+  keywords    TEXT[]  NOT NULL DEFAULT '{}',
+  fee_kobo    BIGINT  NOT NULL,
+  is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO subscription_plans (name, monthly_price_ngn, conversation_limit, product_limit, broadcast_limit) VALUES
-  ('Starter', 10000, 500, 100, 1000),
-  ('Growth',  15000, 2000, 500, 5000),
-  ('Pro',     25000, NULL, NULL, NULL);
+CREATE INDEX idx_delivery_zones_merchant ON merchant_delivery_zones(merchant_id, sort_order);
 ```
 
-### products
-```sql
-CREATE TABLE products (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  merchant_id      UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  name             VARCHAR(255) NOT NULL,
-  description      TEXT,
-  price            BIGINT NOT NULL,                       -- stored in kobo (lowest denomination)
-  category         VARCHAR(100),
-  sku              VARCHAR(100),
-  stock_qty        INTEGER DEFAULT 0,
-  is_active        BOOLEAN DEFAULT TRUE,
-  embedding_version VARCHAR(20),                          -- e.g. "clip-vit-b32-v1" for migration tracking
-  created_at       TIMESTAMPTZ DEFAULT NOW(),
-  updated_at       TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(merchant_id, sku)
-);
+---
 
-CREATE INDEX idx_products_merchant ON products(merchant_id);
-CREATE INDEX idx_products_category ON products(merchant_id, category);
-CREATE INDEX idx_products_active ON products(merchant_id, is_active);
-CREATE INDEX idx_products_name_trgm ON products USING GIN(name gin_trgm_ops);  -- fuzzy search
-CREATE INDEX idx_products_description_fts ON products USING GIN(to_tsvector('english', COALESCE(description,'')));
-```
+## Table: customers
 
-### product_embeddings
-```sql
-CREATE TABLE product_embeddings (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  product_id       UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  image_url        TEXT NOT NULL,
-  embedding        vector(512) NOT NULL,                  -- CLIP ViT-B/32 output dimension
-  model_version    VARCHAR(50) NOT NULL DEFAULT 'clip-vit-b32-v1',
-  created_at       TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(product_id, image_url)
-);
+End customers who interact with merchant bots via Telegram. Contains PII — subject to NDPR right-to-erasure.
 
--- ivfflat index for approximate nearest-neighbour search
-CREATE INDEX idx_product_embeddings_vector ON product_embeddings
-  USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX idx_product_embeddings_product ON product_embeddings(product_id);
-```
+> `display_name` is AES-256-GCM encrypted when set (migration 010). `phone_number` is the Telegram chat ID — not encrypted (used as upsert conflict key).
 
-### product_variants
-```sql
-CREATE TABLE product_variants (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  product_id       UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  size             VARCHAR(20),
-  color            VARCHAR(50),
-  stock_qty        INTEGER DEFAULT 0,
-  price_adjustment BIGINT DEFAULT 0,                      -- delta from base price in kobo
-  sku_variant      VARCHAR(100),
-  is_active        BOOLEAN DEFAULT TRUE,
-  created_at       TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_variants_product ON product_variants(product_id);
-CREATE INDEX idx_variants_active ON product_variants(product_id, is_active);
-```
-
-### customers
 ```sql
 CREATE TABLE customers (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  merchant_id      UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  phone            VARCHAR(20) NOT NULL,
-  name             VARCHAR(255),
-  email            VARCHAR(255),
-  tags             TEXT[] DEFAULT '{}',
-  total_orders     INTEGER DEFAULT 0,
-  total_spent      BIGINT DEFAULT 0,                      -- kobo
-  last_active_at   TIMESTAMPTZ,
-  opted_out        BOOLEAN DEFAULT FALSE,                 -- NDPR: opted out of marketing
-  opted_out_at     TIMESTAMPTZ,
-  created_at       TIMESTAMPTZ DEFAULT NOW(),
-  updated_at       TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(merchant_id, phone)
+  id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  merchant_id         UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  phone_number        TEXT NOT NULL,         -- Telegram chat_id (not actually a phone — legacy column name)
+  display_name        TEXT,                  -- enc:v1:... when set; null on NDPR erasure
+  whatsapp_name       TEXT,                  -- legacy; unused in Telegram-first flow
+
+  opted_in            BOOLEAN NOT NULL DEFAULT FALSE,
+  opted_in_at         TIMESTAMPTZ,
+  opted_out_at        TIMESTAMPTZ,
+
+  language_preference TEXT NOT NULL DEFAULT 'en',
+  metadata            JSONB NOT NULL DEFAULT '{}',
+
+  UNIQUE (merchant_id, phone_number)
 );
 
-CREATE INDEX idx_customers_merchant ON customers(merchant_id);
-CREATE INDEX idx_customers_phone ON customers(merchant_id, phone);
-CREATE INDEX idx_customers_tags ON customers USING GIN(tags);
+CREATE TRIGGER customers_updated_at
+  BEFORE UPDATE ON customers
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 ```
 
-### customer_preferences
+---
+
+## Table: products
+
+Merchant product catalog.
+
 ```sql
-CREATE TABLE customer_preferences (
-  id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  customer_id           UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-  language              VARCHAR(10) DEFAULT 'en',
-  preferred_sizes       TEXT[] DEFAULT '{}',
-  preferred_colors      TEXT[] DEFAULT '{}',
-  marketing_consent     BOOLEAN DEFAULT FALSE,
-  marketing_consent_at  TIMESTAMPTZ,
-  conversation_summary  TEXT,                             -- AI-generated summary of history
-  last_conversation_id  UUID,
-  notes                 TEXT,
-  created_at            TIMESTAMPTZ DEFAULT NOW(),
-  updated_at            TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(customer_id)
+CREATE TABLE products (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 300),
+  description TEXT CHECK (char_length(description) <= 2000),
+  price_kobo  BIGINT NOT NULL CHECK (price_kobo >= 0),  -- NEVER store as float
+  category    TEXT,
+  sizes       TEXT[] NOT NULL DEFAULT '{}',             -- legacy flat array; product_variants preferred
+  colors      TEXT[] NOT NULL DEFAULT '{}',             -- legacy flat array; product_variants preferred
+  stock_count INT CHECK (stock_count >= 0),             -- parent stock; variants override per-variant
+  image_url   TEXT,
+  is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+  metadata    JSONB NOT NULL DEFAULT '{}'
 );
 
-CREATE INDEX idx_customer_prefs_customer ON customer_preferences(customer_id);
+CREATE TRIGGER products_updated_at
+  BEFORE UPDATE ON products
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX idx_products_name_trgm      ON products USING gin (name gin_trgm_ops);
+CREATE INDEX idx_products_merchant_active ON products(merchant_id, is_active);
 ```
 
-### conversations
+---
+
+## Table: product_variants
+
+*(Added migration 006)*
+
+Per size+color stock tracking. Products without variant rows fall back to `products.stock_count`.
+
+```sql
+CREATE TABLE product_variants (
+  id          UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id  UUID    NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  merchant_id UUID    NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  size        TEXT,                          -- NULL if product has no sizes
+  color       TEXT,                         -- NULL if product has no colors
+  stock_count INTEGER NOT NULL DEFAULT 0,
+  sku_variant TEXT,
+  is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE NULLS NOT DISTINCT (product_id, size, color)
+);
+
+CREATE INDEX idx_product_variants_product  ON product_variants(product_id);
+CREATE INDEX idx_product_variants_merchant ON product_variants(merchant_id);
+CREATE INDEX idx_product_variants_active   ON product_variants(product_id, is_active) WHERE is_active = TRUE;
+```
+
+---
+
+## Table: product_embeddings
+
+*(Recreated in migration 004 with 1536-dim OpenAI vectors)*
+
+Semantic search embeddings. One row per product. Model: `text-embedding-3-small`.
+
+```sql
+CREATE TABLE product_embeddings (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id    UUID        NOT NULL UNIQUE REFERENCES products(id) ON DELETE CASCADE,
+  merchant_id   UUID        NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  text_content  TEXT        NOT NULL,                    -- content that was embedded (name | description | category)
+  embedding     vector(1536) NOT NULL,                  -- OpenAI text-embedding-3-small
+  model_version VARCHAR(50) NOT NULL DEFAULT 'text-embedding-3-small',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- IVFFlat ANN index — cosine distance
+-- lists=50 tuned for ~100-1000 products; rebuild with REINDEX after bulk loads
+CREATE INDEX idx_product_embeddings_vector ON product_embeddings
+  USING ivfflat (embedding vector_cosine_ops) WITH (lists = 50);
+
+CREATE INDEX idx_product_embeddings_merchant ON product_embeddings(merchant_id);
+```
+
+### RPC: search_products_by_embedding
+
+```sql
+CREATE OR REPLACE FUNCTION search_products_by_embedding(
+  p_merchant_id UUID,
+  p_embedding   vector(1536),
+  p_threshold   FLOAT DEFAULT 0.5,
+  p_limit       INT   DEFAULT 5
+)
+RETURNS TABLE (
+  id          UUID,
+  name        TEXT,
+  description TEXT,
+  price_kobo  BIGINT,
+  category    TEXT,
+  sizes       TEXT[],
+  colors      TEXT[],
+  image_url   TEXT,
+  similarity  FLOAT
+)
+LANGUAGE SQL STABLE AS $$
+  SELECT p.id, p.name::TEXT, p.description::TEXT, p.price_kobo::BIGINT,
+         p.category::TEXT, p.sizes, p.colors, p.image_url::TEXT,
+         (1.0 - (pe.embedding <=> p_embedding))::FLOAT AS similarity
+  FROM products p
+  INNER JOIN product_embeddings pe ON pe.product_id = p.id
+  WHERE p.merchant_id = p_merchant_id
+    AND p.is_active = TRUE
+    AND (1.0 - (pe.embedding <=> p_embedding)) > p_threshold
+  ORDER BY pe.embedding <=> p_embedding
+  LIMIT p_limit;
+$$;
+```
+
+---
+
+## Table: conversations
+
+Active conversation sessions. State machine state stored in JSONB. Cart stored inline for atomic updates.
+
 ```sql
 CREATE TABLE conversations (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  merchant_id      UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  customer_id      UUID NOT NULL REFERENCES customers(id),
-  channel_type     VARCHAR(20) DEFAULT 'whatsapp',
-  status           VARCHAR(30) DEFAULT 'active',          -- active, waiting_human, human_active, closed
-  ai_confidence    FLOAT,                                 -- last AI confidence score
-  handoff_reason   TEXT,
-  assigned_to      UUID REFERENCES merchants(id),
-  context_json     JSONB DEFAULT '{}',                    -- cart state, current intent
-  started_at       TIMESTAMPTZ DEFAULT NOW(),
-  last_message_at  TIMESTAMPTZ DEFAULT NOW(),
-  closed_at        TIMESTAMPTZ,
-  created_at       TIMESTAMPTZ DEFAULT NOW()
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  merchant_id     UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  customer_id     UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+
+  status          conversation_status NOT NULL DEFAULT 'active',
+  state           JSONB NOT NULL DEFAULT '{"phase": "greeting"}',  -- full state machine state
+  current_intent  TEXT,
+  cart            JSONB NOT NULL DEFAULT '{"items": [], "total_kobo": 0}',
+
+  -- Cart recovery tracking (migration 005)
+  cart_recovery_1_sent_at TIMESTAMPTZ,
+  cart_recovery_2_sent_at TIMESTAMPTZ,
+
+  last_message_at TIMESTAMPTZ,
+  message_count   INT NOT NULL DEFAULT 0
 );
 
-CREATE INDEX idx_conversations_merchant ON conversations(merchant_id);
-CREATE INDEX idx_conversations_customer ON conversations(customer_id);
-CREATE INDEX idx_conversations_status ON conversations(merchant_id, status);
-CREATE INDEX idx_conversations_last_msg ON conversations(merchant_id, last_message_at DESC);
+CREATE TRIGGER conversations_updated_at
+  BEFORE UPDATE ON conversations
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX idx_conversations_merchant_customer ON conversations(merchant_id, customer_id, status);
+CREATE INDEX idx_conversations_last_message ON conversations(last_message_at) WHERE status = 'active';
 ```
 
-### messages
+---
+
+## Table: messages
+
+Full message history, append-only.
+
 ```sql
 CREATE TABLE messages (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  conversation_id  UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  sender_type      VARCHAR(20) NOT NULL,                  -- customer, ai, merchant
-  sender_id        UUID,
-  message_type     VARCHAR(20) DEFAULT 'text',            -- text, image, order_card, payment_link
-  body_text        TEXT,
-  payload_json     JSONB DEFAULT '{}',                    -- structured card data
-  ai_intent        VARCHAR(100),
-  ai_confidence    FLOAT,
-  channel_msg_id   VARCHAR(255),                          -- WhatsApp message ID
-  created_at       TIMESTAMPTZ DEFAULT NOW()
+  id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  conversation_id     UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  merchant_id         UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  customer_id         UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+
+  direction           message_direction NOT NULL,
+  content             TEXT NOT NULL CHECK (char_length(content) <= 4096),
+  message_type        message_type NOT NULL DEFAULT 'text',
+  external_message_id TEXT,
+  metadata            JSONB NOT NULL DEFAULT '{}'
 );
 
-CREATE INDEX idx_messages_conversation ON messages(conversation_id);
-CREATE INDEX idx_messages_created ON messages(conversation_id, created_at DESC);
+CREATE INDEX idx_messages_conversation ON messages(conversation_id, created_at DESC);
+CREATE INDEX idx_messages_merchant     ON messages(merchant_id, created_at DESC);
 ```
 
-### orders
+---
+
+## Table: orders
+
 ```sql
 CREATE TABLE orders (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  merchant_id      UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  customer_id      UUID NOT NULL REFERENCES customers(id),
-  conversation_id  UUID REFERENCES conversations(id),     -- NEW in v2
-  order_number     VARCHAR(20) UNIQUE NOT NULL,           -- ORD-XXXX
-  status           VARCHAR(30) DEFAULT 'pending',         -- pending, confirmed, processing, dispatched, delivered, cancelled, refunded
-  subtotal         BIGINT NOT NULL,                       -- kobo
-  delivery_fee     BIGINT DEFAULT 0,
-  discount         BIGINT DEFAULT 0,
-  total            BIGINT NOT NULL,
-  delivery_address JSONB,
-  delivery_notes   TEXT,
-  cancelled_reason TEXT,
-  created_at       TIMESTAMPTZ DEFAULT NOW(),
-  updated_at       TIMESTAMPTZ DEFAULT NOW()
+  id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  merchant_id       UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  customer_id       UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  conversation_id   UUID NOT NULL REFERENCES conversations(id),
+
+  status            order_status NOT NULL DEFAULT 'pending',
+
+  -- Line items stored as JSONB: [{ product_id, name, price_kobo, qty, size, color }]
+  line_items        JSONB NOT NULL DEFAULT '[]',
+
+  subtotal_kobo     BIGINT NOT NULL CHECK (subtotal_kobo >= 0),
+  delivery_fee_kobo BIGINT NOT NULL DEFAULT 0 CHECK (delivery_fee_kobo >= 0),
+  total_kobo        BIGINT NOT NULL CHECK (total_kobo >= 0),
+
+  -- PII: delivery_address is AES-256-GCM encrypted (migration 010)
+  delivery_address  TEXT,
+  delivery_method   delivery_method,
+  notes             TEXT CHECK (char_length(notes) <= 1000),
+
+  reference         TEXT NOT NULL UNIQUE    -- human-readable, e.g. LMD-20260607-A3F2
+
+  -- webhook_source on orders tracks which channel created the order (migration 007)
 );
 
-CREATE INDEX idx_orders_merchant ON orders(merchant_id);
+CREATE TRIGGER orders_updated_at
+  BEFORE UPDATE ON orders
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX idx_orders_merchant ON orders(merchant_id, created_at DESC);
 CREATE INDEX idx_orders_customer ON orders(customer_id);
-CREATE INDEX idx_orders_conversation ON orders(conversation_id);
-CREATE INDEX idx_orders_status ON orders(merchant_id, status);
-CREATE INDEX idx_orders_created ON orders(merchant_id, created_at DESC);
+CREATE INDEX idx_orders_status   ON orders(status);
 ```
 
-### order_items
-```sql
-CREATE TABLE order_items (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  order_id         UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  product_id       UUID NOT NULL REFERENCES products(id),
-  variant_id       UUID REFERENCES product_variants(id),
-  product_name     VARCHAR(255) NOT NULL,                 -- snapshot at order time
-  variant_label    VARCHAR(100),
-  unit_price       BIGINT NOT NULL,
-  quantity         INTEGER NOT NULL DEFAULT 1,
-  line_total       BIGINT NOT NULL
-);
+---
 
-CREATE INDEX idx_order_items_order ON order_items(order_id);
-```
+## Table: payments
 
-### payments
 ```sql
 CREATE TABLE payments (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  order_id         UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  provider         VARCHAR(20) DEFAULT 'paystack',
-  reference        VARCHAR(100) UNIQUE NOT NULL,
-  idempotency_key  VARCHAR(100) UNIQUE NOT NULL,          -- NEW in v2: prevents double-charge
-  amount           BIGINT NOT NULL,
-  currency         VARCHAR(3) DEFAULT 'NGN',
-  status           VARCHAR(20) DEFAULT 'pending',         -- pending, success, failed, refunded
-  provider_response JSONB DEFAULT '{}',
-  paid_at          TIMESTAMPTZ,
-  refunded_at      TIMESTAMPTZ,
-  created_at       TIMESTAMPTZ DEFAULT NOW()
+  id                   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  order_id             UUID NOT NULL REFERENCES orders(id),
+  merchant_id          UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+
+  status               payment_status NOT NULL DEFAULT 'pending',
+  amount_kobo          BIGINT NOT NULL CHECK (amount_kobo > 0),
+  currency             TEXT NOT NULL DEFAULT 'NGN',
+
+  paystack_reference   TEXT NOT NULL UNIQUE,
+  paystack_access_code TEXT,
+  expires_at           TIMESTAMPTZ,          -- migration 005: payment link expiry tracking
+
+  payment_channel      TEXT,
+  paid_at              TIMESTAMPTZ,
+  metadata             JSONB NOT NULL DEFAULT '{}'
 );
 
-CREATE INDEX idx_payments_order ON payments(order_id);
-CREATE INDEX idx_payments_reference ON payments(reference);
-CREATE INDEX idx_payments_status ON payments(status);
+CREATE TRIGGER payments_updated_at
+  BEFORE UPDATE ON payments
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 ```
 
-### broadcasts
-```sql
-CREATE TABLE broadcasts (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  merchant_id      UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  name             VARCHAR(255),
-  message_text     TEXT NOT NULL,
-  image_url        TEXT,
-  audience_filter  JSONB DEFAULT '{}',
-  recipient_count  INTEGER DEFAULT 0,
-  sent_count       INTEGER DEFAULT 0,
-  failed_count     INTEGER DEFAULT 0,
-  status           VARCHAR(20) DEFAULT 'draft',           -- draft, scheduled, sending, sent, failed
-  scheduled_at     TIMESTAMPTZ,
-  sent_at          TIMESTAMPTZ,
-  created_at       TIMESTAMPTZ DEFAULT NOW()
-);
+---
 
-CREATE INDEX idx_broadcasts_merchant ON broadcasts(merchant_id);
-CREATE INDEX idx_broadcasts_status ON broadcasts(merchant_id, status);
-```
+## Table: webhook_events
 
-### webhook_events
+Raw webhook log for idempotency and debugging. Every inbound webhook is recorded before processing.
+
 ```sql
 CREATE TABLE webhook_events (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  source           VARCHAR(30) NOT NULL,                  -- whatsapp, paystack, system
-  event_type       VARCHAR(100) NOT NULL,
-  idempotency_key  VARCHAR(255) UNIQUE NOT NULL,          -- prevents duplicate processing
-  payload          JSONB NOT NULL,
-  status           VARCHAR(20) DEFAULT 'pending',         -- pending, processed, failed, skipped
-  retry_count      INTEGER DEFAULT 0,
-  last_error       TEXT,
-  processed_at     TIMESTAMPTZ,
-  created_at       TIMESTAMPTZ DEFAULT NOW()
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  source       webhook_source NOT NULL,   -- 'termii' | 'paystack' | 'telegram'
+  event_type   TEXT NOT NULL,
+  external_id  TEXT,
+  status       webhook_status NOT NULL DEFAULT 'received',
+  payload      JSONB NOT NULL,
+  error_message TEXT,
+  processed_at TIMESTAMPTZ
 );
 
-CREATE INDEX idx_webhook_events_source ON webhook_events(source, event_type);
-CREATE INDEX idx_webhook_events_status ON webhook_events(status);
-CREATE INDEX idx_webhook_events_idempotency ON webhook_events(idempotency_key);
-CREATE INDEX idx_webhook_events_created ON webhook_events(created_at DESC);
+-- Idempotency: prevents double-processing the same Telegram update_id or Paystack event
+CREATE UNIQUE INDEX idx_webhook_events_dedup ON webhook_events(source, external_id)
+  WHERE external_id IS NOT NULL;
+
+CREATE INDEX idx_webhook_events_status ON webhook_events(status, created_at DESC);
 ```
 
-### audit_logs
+---
+
+## Table: audit_logs
+
+Append-only log for NDPR compliance and security audit. No UPDATE or DELETE allowed via RLS.
+
 ```sql
--- NDPR compliance: immutable log of all data access and mutations
 CREATE TABLE audit_logs (
-  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  actor_type       VARCHAR(20) NOT NULL,                  -- merchant, customer, system, admin
-  actor_id         UUID NOT NULL,
-  action           VARCHAR(50) NOT NULL,                  -- CREATE, READ, UPDATE, DELETE, EXPORT, ERASE
-  resource_type    VARCHAR(50) NOT NULL,                  -- customer, order, conversation, product
-  resource_id      UUID NOT NULL,
-  before_json      JSONB,                                 -- NULL for CREATE
-  after_json       JSONB,                                 -- NULL for DELETE
-  ip_address       INET,
-  user_agent       TEXT,
-  created_at       TIMESTAMPTZ DEFAULT NOW()
-  -- No UPDATE or DELETE on this table - append-only via RLS
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  merchant_id   UUID REFERENCES merchants(id) ON DELETE SET NULL,
+  actor_id      UUID,
+  actor_type    actor_type NOT NULL DEFAULT 'system',
+  action        TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id   UUID,
+  metadata      JSONB NOT NULL DEFAULT '{}',
+  ip_address    TEXT
 );
 
-CREATE INDEX idx_audit_actor ON audit_logs(actor_type, actor_id);
-CREATE INDEX idx_audit_resource ON audit_logs(resource_type, resource_id);
-CREATE INDEX idx_audit_action ON audit_logs(action);
-CREATE INDEX idx_audit_created ON audit_logs(created_at DESC);
+CREATE INDEX idx_audit_logs_merchant  ON audit_logs(merchant_id, created_at DESC);
+CREATE INDEX idx_audit_logs_resource  ON audit_logs(resource_type, resource_id, created_at DESC);
 ```
 
 ---
 
-## Row Level Security (Supabase RLS)
+## NDPR: Right-to-Erasure Procedure
 
 ```sql
--- Merchants can only access their own data
-ALTER TABLE products ENABLE ROW LEVEL SECURITY;
-CREATE POLICY merchant_owns_products ON products
-  USING (merchant_id = auth.uid());
-
-ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
-CREATE POLICY merchant_owns_customers ON customers
-  USING (merchant_id = auth.uid());
-
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-CREATE POLICY merchant_owns_orders ON orders
-  USING (merchant_id = auth.uid());
-
--- audit_logs: merchants can read their own, but not write directly
-ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY merchant_reads_own_audit ON audit_logs
-  FOR SELECT USING (actor_id = auth.uid() OR resource_id IN (
-    SELECT id FROM customers WHERE merchant_id = auth.uid()
-  ));
-```
-
----
-
-## NDPR Data Erasure Procedure
-
-```sql
--- Called when merchant or customer invokes right to erasure
-CREATE OR REPLACE FUNCTION erase_customer_data(p_customer_id UUID, p_requested_by UUID)
-RETURNS void AS $$
+CREATE OR REPLACE FUNCTION anonymize_customer(p_customer_id UUID)
+RETURNS VOID AS $$
+DECLARE
+  anon_phone TEXT := 'DELETED-' || LEFT(p_customer_id::TEXT, 8);
 BEGIN
-  -- Log the erasure request first
-  INSERT INTO audit_logs(actor_type, actor_id, action, resource_type, resource_id)
-  VALUES ('merchant', p_requested_by, 'ERASE', 'customer', p_customer_id);
-
-  -- Anonymise PII (do not hard-delete to preserve order integrity)
   UPDATE customers SET
-    name = 'ERASED',
-    email = NULL,
-    phone = 'ERASED-' || SUBSTR(phone, -4),
-    updated_at = NOW()
+    phone_number    = anon_phone,
+    display_name    = NULL,
+    whatsapp_name   = NULL,
+    opted_in        = FALSE,
+    opted_out_at    = NOW(),
+    metadata        = '{}'
   WHERE id = p_customer_id;
 
-  UPDATE customer_preferences SET
-    conversation_summary = NULL,
-    notes = NULL,
-    updated_at = NOW()
+  UPDATE messages SET
+    content = '[Message removed - NDPR erasure]',
+    metadata = '{}'
   WHERE customer_id = p_customer_id;
+
+  INSERT INTO audit_logs (actor_type, action, resource_type, resource_id, metadata)
+  VALUES (
+    'system', 'ndpr_erasure', 'customer', p_customer_id,
+    jsonb_build_object('erased_at', NOW(), 'reason', 'customer_request')
+  );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 ```
+
+---
+
+## Key Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| Money in kobo | Avoids float rounding errors in financial calculations. Never store NGN as float. |
+| Line items as JSONB | Atomic cart-to-order snapshot. Avoids join at order read time; products can change price without affecting historical orders. |
+| Conversation state in JSONB | Single atomic read/write for state machine transition; no separate state table needed at MVP scale. |
+| PII encrypted at app layer (not Postgres) | Column-level encryption transparent to Supabase RLS; no Postgres extension dependency. Encryption key rotatable without schema change. |
+| email_hash for search | AES ciphertext is not searchable. HMAC-SHA256 hash allows exact-match email lookup (duplicate detection, CRM login) without decrypting. |
+| auth_user_id FK to auth.users | Delegates credential management to Supabase Auth. No custom password_hash column. |
+| pgvector IVFFlat index | Approximate nearest-neighbour at low latency. `lists=50` tuned for < 10K products; rebuild with REINDEX at scale. |

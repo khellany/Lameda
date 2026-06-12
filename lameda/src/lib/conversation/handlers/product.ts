@@ -29,7 +29,7 @@ export async function handleProductDetail(ctx: ConversationContext): Promise<Han
   }
 
   const description = product.description
-    ? await generateProductDescription(product, ctx.rawMessage)
+    ? await generateProductDescription(product, ctx.rawMessage, ctx.state.language, undefined)
     : buildFallbackDescription(product)
 
   const hasCart = ctx.merchantConfig?.hasCart !== false

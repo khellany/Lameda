@@ -1,14 +1,16 @@
 # Product Requirements Document (PRD)
 ## Lameda - v2
-### Version: 2.0 | Date: May 2026 | Status: Engineering-Ready
+### Version: 2.1 | Date: June 2026 | Status: Sprint 4 Complete — Sprint 5 Active
 
 ---
 
 ## 1. Executive Summary
 
-Lameda is a WhatsApp-first conversational commerce platform for Nigerian SMEs, starting with fashion retailers. It automates product inquiries, order processing, payment collection, delivery updates, and customer support entirely inside WhatsApp. The platform uses rule-based workflows augmented by Claude AI (Haiku for triage, Sonnet for complex intent) and CLIP-based image matching.
+Lameda is a **Telegram-first** conversational commerce platform for Nigerian SMEs, starting with fashion retailers. It automates product inquiries, order processing, payment collection, delivery updates, and customer support entirely inside Telegram. The platform uses rule-based workflows augmented by Claude AI for intent classification and response generation, and OpenAI text-embedding-3-small for semantic product search via pgvector.
 
-The MVP targets merchants with under 100 products, approximately 20 daily customer chats, average order values above N50,000, and a strong need to eliminate manual workload. The commercial model is a monthly SaaS subscription (Starter N10K, Growth N15K, Pro N25K) with a 14-day free trial. The system is built on Supabase + pgvector, Next.js 14, Vercel Edge, WhatsApp Cloud API, Paystack, and Termii as BSP.
+The MVP targets merchants with under 100 products, approximately 20 daily customer conversations, average order values above N50,000, and a strong need to eliminate manual workload. The commercial model is a monthly SaaS subscription (Starter N10K, Growth N15K, Pro N25K) with a 14-day free trial. The system is built on Supabase + pgvector, Next.js 16 App Router, Vercel, Paystack, and Resend.
+
+> **Channel note:** WhatsApp/Termii integration is deferred to Phase 2. The implemented and live channel is Telegram.
 
 ---
 
@@ -63,7 +65,7 @@ A merchant uploads products once, shares a bot link, and Lameda handles the full
 - Under 100 SKUs at MVP launch.
 - 20+ daily customer conversations.
 - Average order value above N50,000.
-- WhatsApp as primary sales channel.
+- Telegram as primary sales channel.
 - Comfortable with dashboards; uncomfortable with spreadsheets.
 
 ### Primary Customer Segment
@@ -101,7 +103,7 @@ A merchant uploads products once, shares a bot link, and Lameda handles the full
 - Native mobile apps.
 - Automated courier API integration.
 - Advanced loyalty engine.
-- Telegram channel support (deferred to Phase 2).
+- WhatsApp/Termii channel support (deferred to Phase 2).
 
 ---
 
@@ -109,11 +111,13 @@ A merchant uploads products once, shares a bot link, and Lameda handles the full
 
 ### 8.1 Merchant Onboarding
 1. Merchant discovers Lameda via social proof or outreach.
-2. Web intake form captures business type, product count, current channel.
-3. Magic link sent to email for account activation.
-4. Setup wizard: connect WhatsApp number, upload catalog, set policies and FAQs, choose bot persona, set operating hours.
-5. Merchant reviews bot preview and goes live.
-6. Bot link is shared to customers.
+2. Web onboarding form (`/onboard`) captures business name, owner name, email, business type, and Telegram bot token.
+3. System validates the Telegram bot token against the Telegram API.
+4. Supabase Auth account created; temporary password sent in welcome email.
+5. Telegram webhook registered at `/api/webhook/telegram/{merchant_id}`.
+6. Merchant uploads catalog via dashboard CSV import or manual product creation.
+7. Merchant sends `/register <api_key>` in their bot to link their admin Telegram account.
+8. Bot link (`t.me/botname`) is shared to customers.
 
 **Acceptance criterion:** Merchant completes full onboarding within 30 minutes from signup.
 
@@ -153,8 +157,8 @@ A merchant uploads products once, shares a bot link, and Lameda handles the full
 ## 9. Functional Requirements
 
 ### Merchant Setup
-- FR-01: Merchant shall create an account with email and password.
-- FR-02: Merchant shall connect a WhatsApp number via WhatsApp Cloud API through Termii BSP.
+- FR-01: Merchant shall create an account via the self-service onboarding form. Supabase Auth manages credentials; a temporary password is emailed on registration.
+- FR-02: Merchant shall connect a Telegram bot by providing a BotFather token. The system validates the token and auto-registers the webhook.
 - FR-03: Merchant shall upload products individually or in bulk via CSV.
 - FR-04: Merchant shall define business hours, delivery policy, return policy, and FAQ bank.
 - FR-05: Merchant shall select a bot persona (professional, friendly, vibrant).
@@ -177,7 +181,7 @@ A merchant uploads products once, shares a bot link, and Lameda handles the full
 - FR-18: Unpaid orders shall expire after 24 hours and release reserved stock.
 
 ### Operations
-- FR-19: Merchant shall receive real-time WhatsApp notification for new paid orders.
+- FR-19: Merchant shall receive real-time Telegram notification for new paid orders (via admin_telegram_chat_id).
 - FR-20: Merchant shall move orders through states: confirm, pack, ship, deliver, complete.
 - FR-21: Merchant shall log complaint resolutions (replace, refund, exchange, investigate).
 - FR-22: Merchant shall schedule broadcast messages to customer segments.
@@ -196,7 +200,7 @@ A merchant uploads products once, shares a bot link, and Lameda handles the full
 
 ### Performance
 - NFR-01: p95 end-to-end API response time shall be under 2 seconds under normal load.
-- NFR-02: WhatsApp Cloud API webhook acknowledgement shall return HTTP 200 within 500ms.
+- NFR-02: Telegram webhook acknowledgement shall return HTTP 200 within 500ms.
 - NFR-03: Platform uptime shall be 99.9% per calendar month (maximum 43.8 minutes downtime/month).
 - NFR-04: Product image search (CLIP vector match) shall return results within 3 seconds.
 - NFR-05: Dashboard page load shall be under 1.5 seconds for First Contentful Paint.
@@ -213,7 +217,7 @@ A merchant uploads products once, shares a bot link, and Lameda handles the full
 ### Scalability
 - NFR-13: System shall support up to 100 merchants in single Supabase project configuration.
 - NFR-14: Architecture shall be designed to support read replicas and Redis caching at 100-1000 merchant scale.
-- NFR-15: System shall handle up to 10,000 inbound WhatsApp messages per day at MVP scale.
+- NFR-15: System shall handle up to 10,000 inbound Telegram updates per day at MVP scale.
 
 ### Observability
 - NFR-16: All API errors shall be captured in Sentry with merchant_id, request_id, and stack trace.
@@ -267,12 +271,29 @@ Lameda processes personal data on behalf of merchants (data processors) whose cu
 
 ## 13. Key Decisions
 
-- WhatsApp Cloud API via Termii BSP is the primary channel. Telegram deferred to Phase 2.
-- Human handoff is required and must be triggered by confidence and sentiment thresholds, not just merchant request.
-- Order payment confirmation must be automatic via webhook - no manual payment marking in MVP.
-- CLIP image matching is core, not a stretch feature - it is a primary product differentiator.
+### Confirmed Decisions
+- Telegram is the primary channel for MVP. WhatsApp/Termii is Phase 2 (see RD-001 below).
+- Human handoff is required and must be triggered by confidence threshold, not just merchant request.
+- Order payment confirmation is automatic via Paystack webhook — no manual payment marking in MVP.
 - NDPR compliance is built in from day one, not retrofitted.
 - Supabase with pgvector is used for both relational data and vector search to reduce operational complexity at MVP scale.
+
+---
+
+## 14. Resource-Constrained Decisions — Dropped for MVP, Future State Planned
+
+These were deliberate scope cuts made due to time, money, or operational capacity at the pre-seed stage. They are not abandoned — they are sequenced.
+
+| Ref | Original plan | What shipped | Why dropped | Future state |
+|-----|--------------|-------------|-------------|-------------|
+| **RD-001** | WhatsApp as primary channel via Termii BSP (PRD FR-02, original exec summary) | Telegram Bot API | WhatsApp Cloud API requires Meta business verification + BSP (Termii) onboarding — weeks of friction, per-message costs, ongoing BSP relationship. Telegram: free, instant, zero approval. Full WhatsApp infrastructure (`src/lib/whatsapp/`) is built and waiting. | **Phase 2.** Activate when merchant acquisition requires WhatsApp. No schema changes needed. |
+| **RD-002** | NestJS backend with microservice architecture | Next.js 16 App Router (unified) | NestJS requires separate AWS ECS hosting, separate CI/CD, separate env management — 2× ops overhead for a 2-person pre-seed team. Next.js collapses frontend + API into one Vercel deploy. | **At 1000+ merchants or when webhook handler cold-start latency is measurable.** Extract conversation engine into NestJS microservice on ECS. |
+| **RD-003** | CLIP image embeddings for customer photo search (PRD FR-09 — "customer shares product image to receive CLIP-matched results") | OpenAI `text-embedding-3-small` for text-only search | CLIP (ViT-B/32 or ViT-L/14) requires a self-hosted endpoint or Replicate API. Text embeddings cover 90% of catalog search quality at near-zero cost and zero additional infrastructure. Noted in code as TD-008 in `src/lib/ai/embed.ts`. | **Sprint 7–8.** Add customer photo search via CLIP (Replicate). The DB schema already accommodates a second `clip_embedding vector(512)` column on `product_embeddings`. |
+| **RD-004** | Redis for session state and rate limiting (architecture docs, NFR-14) | DB-backed rate limiting (`src/lib/utils/rateLimit.ts`) | Redis adds ~$15–30/month managed service. DB-backed rate limiting is adequate at < 100 concurrent conversations. | **At 100+ concurrent conversations.** Add Upstash Redis (serverless, per-request billing) for sub-millisecond rate checks and conversation context caching. |
+| **RD-005** | Multi-model Claude routing — Haiku for triage, Sonnet for complex intents (PRD §11) | Single model across all intents | Two-model routing adds a routing call, billing complexity, and double the prompt maintenance. Cost difference is negligible at < 500 conversations/day. | **At scale.** Route low-complexity intents (greeting, order status, simple browse) through `claude-haiku-4-5` to cut per-conversation AI cost by ~70%. |
+| **RD-006** | Sentiment analysis / emotion classifier on every message (PRD §11 — "frustrated, angry, distressed" labels) | Intent confidence threshold only (handoff < 0.7) | Running a separate emotion classifier doubles AI cost per message. Confidence-based handoff catches most hostility via intent. | **Sprint 6–7.** Add emotion label as a structured output field in the existing classification call — no extra API call, just an additional output field in the classification response. |
+| **RD-007** | Paystack virtual accounts / bank transfer (PRD FR-15) | Paystack hosted checkout link only | Virtual accounts require additional Paystack account configuration and a separate API integration flow. Hosted checkout covers 95% of payments with zero extra setup. | **Phase 2.** Activate Paystack `dedicated_account` endpoint when merchants explicitly request bank transfer as a payment option. |
+| **RD-008** | Sentry error monitoring (NFR-16: "all API errors captured in Sentry with merchant_id, request_id, stack trace") | Pino structured JSON logging | Sentry Team plan costs ~$26/month. Pino JSON logs via Vercel log drain are sufficient for manual debugging at current scale. | **Before public launch / Sprint 6.** Sentry integrates in one line with Next.js. Add it as part of Sprint 6 infrastructure work. |
 
 ---
 
