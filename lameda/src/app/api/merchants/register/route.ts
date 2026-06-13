@@ -16,6 +16,7 @@ const RegisterSchema = z.object({
   whatsapp_number: z.string().optional(),
   business_type: z.enum(['fashion', 'food', 'electronics', 'beauty', 'services', 'general']),
   telegram_bot_token: z.string().min(10),
+  referral_code: z.string().regex(/^LMD[A-Z0-9]{5}$/).optional(),
 })
 
 /** Generate a readable temporary password: 3 word-segments + numbers */
@@ -24,6 +25,14 @@ function generateTempPassword(): string {
   const pick = () => words[Math.floor(Math.random() * words.length)]
   const digits = Math.floor(1000 + Math.random() * 9000)
   return `${pick()}-${pick()}-${digits}`
+}
+
+/** Generate a unique 8-char referral code: LMD + 5 uppercase alphanumeric (no 0/O/1/I) */
+function generateReferralCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  let suffix = ''
+  for (let i = 0; i < 5; i++) suffix += chars[Math.floor(Math.random() * chars.length)]
+  return `LMD${suffix}`
 }
 
 export async function POST(request: NextRequest) {
@@ -55,8 +64,9 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient()
 
-  // Generate a per-merchant API key
+  // Generate a per-merchant API key and referral code
   const apiKey = `lmd_${crypto.randomUUID().replace(/-/g, '')}`
+  const referralCode = generateReferralCode()
 
   // Generate a temporary CRM password — sent in welcome email, merchant changes on first login
   const tempPassword = generateTempPassword()
@@ -111,6 +121,8 @@ export async function POST(request: NextRequest) {
       subscription_status: 'trial',
       trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       api_key: apiKey,
+      referral_code: referralCode,
+      referred_by_code: data.referral_code ?? null,
       auth_user_id: authUserId,
       is_active: true,
     })
@@ -127,6 +139,12 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  // Referral attribution is stored in `referred_by_code` above. The reward
+  // (+30 days to the referrer) now fires on the referred merchant's FIRST
+  // subscription payment — handled in the Paystack webhook (STORY-034) and
+  // guarded by `referral_rewarded_at` so it applies exactly once. This means
+  // referrers are only rewarded for referrals that convert to paying merchants.
+
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
   const resolvedBotName = botName ?? data.business_name
 
@@ -139,9 +157,15 @@ export async function POST(request: NextRequest) {
   )
 
   logger.info(
-    { merchantId: merchant.id, webhookOk: webhookResult.ok },
+    { merchantId: merchant.id, webhookOk: webhookResult.ok, event: 'funnel.register' },
     'Merchant registered via self-service',
   )
+
+  // STORY-028: stamp funnel step 3 when the webhook is successfully configured.
+  if (webhookResult.ok) {
+    await supabase.from('merchants').update({ webhook_configured_at: new Date().toISOString() }).eq('id', merchant.id)
+    logger.info({ merchantId: merchant.id, event: 'funnel.webhook_configured' }, 'Webhook configured')
+  }
 
   // Send welcome email with credentials + Telegram deep link + step-by-step guide
   const { subject, html, text } = buildMerchantWelcomeEmail({
@@ -176,6 +200,7 @@ export async function POST(request: NextRequest) {
     success: true,
     business_name: merchant.business_name,
     api_key: apiKey,
+    referral_code: referralCode,
     bot_name: resolvedBotName,
     telegram_link: `https://t.me/${resolvedBotName}?start=${apiKey}`,
     email_sent: true,

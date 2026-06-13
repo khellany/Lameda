@@ -39,6 +39,35 @@ export interface PaystackChargeEvent {
   }
 }
 
+/**
+ * Broader webhook event shape covering both one-off charges and native
+ * subscription lifecycle events (STORY-034). All fields are optional because
+ * the union of Paystack event payloads is wide; handlers read defensively.
+ *
+ * Events of interest:
+ *   charge.success            — money received (order OR subscription, incl. renewals)
+ *   subscription.create       — recurring subscription established (has subscription_code, next_payment_date)
+ *   invoice.payment_failed    — a renewal charge failed
+ *   subscription.disable      — subscription cancelled / exhausted
+ */
+export interface PaystackWebhookEvent {
+  event: string
+  data: {
+    reference?: string
+    amount?: number
+    status?: string
+    channel?: string
+    paid_at?: string
+    next_payment_date?: string
+    subscription_code?: string
+    email_token?: string
+    customer?: { email?: string; customer_code?: string }
+    plan?: { plan_code?: string; name?: string; amount?: number }
+    subscription?: { subscription_code?: string; next_payment_date?: string }
+    metadata?: Record<string, unknown>
+  }
+}
+
 // ----------------------------------------------------------------
 // Initialize transaction
 // ----------------------------------------------------------------
@@ -59,12 +88,15 @@ export async function initializeTransaction({
   reference,
   callbackUrl,
   metadata,
+  plan,
 }: {
   amountKobo: number
   email: string
   reference: string
   callbackUrl: string
   metadata: Record<string, unknown>
+  /** Paystack Plan code (PLN_…). When set, Paystack sets up native recurring billing. */
+  plan?: string
 }): Promise<PaystackInitResult | null> {
   const secretKey = process.env.PAYSTACK_SECRET_KEY
   if (!secretKey) {
@@ -87,6 +119,9 @@ export async function initializeTransaction({
         metadata,
         currency: 'NGN',
         channels: ['card', 'bank', 'ussd', 'bank_transfer'],
+        // When a plan code is supplied, Paystack creates a recurring subscription
+        // after the first successful charge and ignores `amount` in favour of the plan.
+        ...(plan ? { plan } : {}),
       }),
     })
 

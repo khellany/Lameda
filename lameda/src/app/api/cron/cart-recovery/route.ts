@@ -9,15 +9,16 @@
  * Each message is sent only once (tracked via cart_recovery_1/2_sent_at).
  * Stops if the conversation is completed (order placed).
  *
- * Schedule (vercel.json): every 15 minutes — requires Vercel Pro plan.
- * On Hobby plan this fires daily; recovery messages will still send, just later.
+ * Schedule: every 15 minutes via cron-job.org (`*/15 * * * *` UTC). See docs/CRON_SETUP.md.
+ * (Vercel Hobby can't run sub-daily crons, so scheduling lives on cron-job.org.)
  *
- * Auth: CRON_SECRET header (set in Vercel env, also in vercel.json)
+ * Auth: `Authorization: Bearer <CRON_SECRET>` — fail-closed (401 if unset/mismatched).
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { sendButtonsMessage } from '@/lib/telegram/client'
+import { safeDecrypt } from '@/lib/crypto/pii'
 import { formatNaira } from '@/lib/ai/respond'
 import { logger } from '@/lib/utils/logger'
 
@@ -25,9 +26,13 @@ const RECOVERY_1_MINUTES = 15
 const RECOVERY_2_MINUTES = 120
 
 export async function GET(request: NextRequest) {
-  // Verify cron secret to prevent unauthorized triggers
+  // Fail closed: reject if the cron secret is unset/empty OR doesn't match.
+  // (`secret !== process.env.CRON_SECRET` alone passes when both are undefined —
+  // a silent-open hole. Vercel injects `Authorization: Bearer <CRON_SECRET>` only
+  // when CRON_SECRET is set in the deployment's env.)
+  const expected = process.env.CRON_SECRET
   const secret = request.headers.get('authorization')?.replace('Bearer ', '')
-  if (secret !== process.env.CRON_SECRET) {
+  if (!expected || secret !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -69,6 +74,10 @@ export async function GET(request: NextRequest) {
 
     if (!merchant?.telegram_bot_token || !customer?.phone_number) continue
 
+    // Tokens are encrypted at rest (Sprint 5). Decrypt before use; fall back to
+    // the raw value for any legacy unencrypted token.
+    const botToken = safeDecrypt(merchant.telegram_bot_token) ?? merchant.telegram_bot_token
+
     const cartSummary = cart.items
       .map(i => `• ${i.name} ×${i.quantity} — ${formatNaira(i.priceKobo * i.quantity)}`)
       .join('\n')
@@ -84,7 +93,7 @@ export async function GET(request: NextRequest) {
         `*Total: ${formatNaira(cart.totalKobo)}*\n\n` +
         `Complete your order before your items sell out! 🏃‍♀️`
 
-      await sendButtonsMessage(merchant.telegram_bot_token, customer.phone_number, msg, [
+      await sendButtonsMessage(botToken, customer.phone_number, msg, [
         { id: 'view_cart', title: '🛒 Complete Order' },
         { id: 'browse_all', title: '🛍 Keep Browsing' },
       ])
@@ -108,7 +117,7 @@ export async function GET(request: NextRequest) {
         `Total: *${formatNaira(cart.totalKobo)}*\n\n` +
         `Still interested? Your cart is saved and ready! 😊`
 
-      await sendButtonsMessage(merchant.telegram_bot_token, customer.phone_number, msg, [
+      await sendButtonsMessage(botToken, customer.phone_number, msg, [
         { id: 'view_cart', title: '🛒 View Cart' },
         { id: 'browse_all', title: '🛍 Keep Browsing' },
       ])

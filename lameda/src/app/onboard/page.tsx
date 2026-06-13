@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 
 type BusinessType = 'fashion' | 'food' | 'electronics' | 'beauty' | 'services' | 'general'
 
@@ -8,6 +9,7 @@ interface RegisterResult {
   success: true
   business_name: string
   api_key: string
+  referral_code: string
   bot_name: string
   telegram_link: string
   email_sent: boolean
@@ -20,6 +22,7 @@ interface FormState {
   whatsapp_number: string
   business_type: BusinessType
   telegram_bot_token: string
+  referral_code: string
 }
 
 const BUSINESS_TYPE_LABELS: Record<BusinessType, string> = {
@@ -31,7 +34,9 @@ const BUSINESS_TYPE_LABELS: Record<BusinessType, string> = {
   general: '🏪 General / Other',
 }
 
-export default function OnboardPage() {
+function OnboardForm() {
+  const searchParams = useSearchParams()
+
   const [form, setForm] = useState<FormState>({
     business_name: '',
     owner_name: '',
@@ -39,11 +44,19 @@ export default function OnboardPage() {
     whatsapp_number: '',
     business_type: 'general',
     telegram_bot_token: '',
+    referral_code: '',
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<RegisterResult | null>(null)
   const [copied, setCopied] = useState(false)
+  const [refCopied, setRefCopied] = useState(false)
+
+  // Pre-fill referral code from ?ref= query param (from shared links)
+  useEffect(() => {
+    const ref = searchParams.get('ref')
+    if (ref) setForm(prev => ({ ...prev, referral_code: ref.toUpperCase() }))
+  }, [searchParams])
 
   function update(field: keyof FormState, value: string) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -66,6 +79,7 @@ export default function OnboardPage() {
           whatsapp_number: form.whatsapp_number || undefined,
           business_type: form.business_type,
           telegram_bot_token: form.telegram_bot_token,
+          referral_code: form.referral_code.trim().toUpperCase() || undefined,
         }),
       })
 
@@ -92,12 +106,23 @@ export default function OnboardPage() {
     })
   }
 
+  function copyReferralLink() {
+    if (!result) return
+    const appUrl = window.location.origin
+    navigator.clipboard.writeText(`${appUrl}/onboard?ref=${result.referral_code}`).then(() => {
+      setRefCopied(true)
+      setTimeout(() => setRefCopied(false), 2000)
+    })
+  }
+
   if (result) {
+    const appUrl = typeof window !== 'undefined' ? window.location.origin : ''
+    const referralLink = `${appUrl}/onboard?ref=${result.referral_code}`
+
     return (
       <div className="min-h-screen bg-zinc-50 flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm border border-zinc-100 p-8">
 
-          {/* Header */}
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-xl">✓</div>
             <div>
@@ -106,12 +131,11 @@ export default function OnboardPage() {
             </div>
           </div>
 
-          {/* Email confirmation notice */}
           <div className="mb-5 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
             📧 Your API key and login details have been sent to your email. Keep that email safe.
           </div>
 
-          {/* API Key — shown once on screen */}
+          {/* API Key */}
           <div className="mb-5">
             <label className="block text-xs font-medium text-zinc-500 mb-1.5 uppercase tracking-wide">
               API Key <span className="text-red-500 font-normal">(copy this — shown once)</span>
@@ -129,7 +153,7 @@ export default function OnboardPage() {
             </div>
           </div>
 
-          {/* Primary CTA — open bot on Telegram */}
+          {/* Primary CTA */}
           <a
             href={result.telegram_link}
             target="_blank"
@@ -140,7 +164,6 @@ export default function OnboardPage() {
             <span>Open your bot on Telegram</span>
           </a>
 
-          {/* Secondary CTA — CRM portal */}
           <a
             href="/login"
             className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-zinc-50 text-zinc-700 text-sm font-semibold rounded-xl border border-zinc-200 hover:bg-zinc-100 transition-colors mb-6"
@@ -148,6 +171,26 @@ export default function OnboardPage() {
             <span>📊</span>
             <span>Go to your merchant dashboard</span>
           </a>
+
+          {/* Referral code */}
+          <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl mb-5">
+            <h2 className="text-sm font-semibold text-emerald-900 mb-1">Earn free months 🎁</h2>
+            <p className="text-xs text-emerald-700 mb-3">
+              Share your referral link. Every merchant who signs up with your code gives you <strong>+30 days free</strong>.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs bg-white border border-emerald-200 text-emerald-800 rounded-lg px-3 py-2 font-mono truncate">
+                {referralLink}
+              </code>
+              <button
+                onClick={copyReferralLink}
+                className="shrink-0 px-3 py-2 text-xs bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg transition-colors font-medium"
+              >
+                {refCopied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-emerald-600">Your code: <strong>{result.referral_code}</strong></p>
+          </div>
 
           {/* Next steps */}
           <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-100">
@@ -258,6 +301,23 @@ export default function OnboardPage() {
             />
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-zinc-700 mb-1.5">
+              Referral code <span className="text-zinc-400 font-normal">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={form.referral_code}
+              onChange={e => update('referral_code', e.target.value.toUpperCase())}
+              placeholder="LMDXXXXX"
+              maxLength={8}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-200 text-zinc-900 text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent"
+            />
+            <p className="mt-1.5 text-xs text-zinc-400">
+              Got a code from a fellow merchant? Enter it here — they&rsquo;ll get 30 days free.
+            </p>
+          </div>
+
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
               {error}
@@ -278,5 +338,13 @@ export default function OnboardPage() {
         </form>
       </div>
     </div>
+  )
+}
+
+export default function OnboardPage() {
+  return (
+    <Suspense>
+      <OnboardForm />
+    </Suspense>
   )
 }

@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "setup:paystack-plans": "node --env-file=.env.local scripts/create-paystack-plans.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",

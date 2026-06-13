@@ -263,6 +263,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const isSlashCommand = incomingText.startsWith('/')
     const isAdminSender = merchant.admin_telegram_chat_id === message.from
 
+    // STORY-028: stamp funnel step 4 on the first inbound customer message.
+    // Null-guarded so the write fires at most once per merchant; idempotent at DB level.
+    if (!isAdminSender) {
+      supabase
+        .from('merchants')
+        .update({ first_customer_message_at: new Date().toISOString() })
+        .eq('id', merchantId)
+        .is('first_customer_message_at', null)
+        .then(
+          ({ error }) => { if (!error) logger.info({ merchantId, event: 'funnel.first_customer_message' }, 'First customer message received') },
+          () => null, // non-fatal: don't block the customer response
+        )
+    }
+
     let result = null as import('@/lib/conversation/types').HandlerResult | null
 
     if (isSlashCommand && incomingText.toLowerCase().startsWith('/register')) {

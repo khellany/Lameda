@@ -8,13 +8,14 @@
  * Only ONE payment link is ever generated per order (no reissue).
  * Non-payment after expiry = cancelled.
  *
- * Schedule (vercel.json): every 15 minutes.
- * Auth: CRON_SECRET header
+ * Schedule: every 15 minutes via cron-job.org (`*/15 * * * *` UTC). See docs/CRON_SETUP.md.
+ * Auth: `Authorization: Bearer <CRON_SECRET>` — fail-closed.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { sendButtonsMessage } from '@/lib/telegram/client'
+import { safeDecrypt } from '@/lib/crypto/pii'
 import { formatNaira } from '@/lib/ai/respond'
 import { logger } from '@/lib/utils/logger'
 
@@ -25,8 +26,12 @@ interface CartItem {
 }
 
 export async function GET(request: NextRequest) {
+  // Fail closed: reject if the cron secret is unset/empty OR doesn't match.
+  // Vercel injects `Authorization: Bearer <CRON_SECRET>` only when CRON_SECRET
+  // is set in the deployment's env — see merchant-digest for the same pattern.
+  const expected = process.env.CRON_SECRET
   const secret = request.headers.get('authorization')?.replace('Bearer ', '')
-  if (secret !== process.env.CRON_SECRET) {
+  if (!expected || secret !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -96,13 +101,15 @@ export async function GET(request: NextRequest) {
 
     // 4. Notify customer
     if (merchant?.telegram_bot_token && customer?.phone_number) {
+      // Tokens are encrypted at rest (Sprint 5); fall back to raw for legacy tokens.
+      const botToken = safeDecrypt(merchant.telegram_bot_token) ?? merchant.telegram_bot_token
       const msg =
         `❌ *Order Cancelled — ${order.reference}*\n\n` +
         `Your payment link expired before payment was completed.\n\n` +
         `Total was: *${formatNaira(order.total_kobo)}*\n\n` +
         `Would you like to place a new order?`
 
-      await sendButtonsMessage(merchant.telegram_bot_token, customer.phone_number, msg, [
+      await sendButtonsMessage(botToken, customer.phone_number, msg, [
         { id: 'browse_all', title: '🛍 Shop Again' },
       ])
     }

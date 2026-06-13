@@ -1,0 +1,17 @@
+name: Security
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Scan for hardcoded secrets
+        run: node scripts/scan-secrets.mjs
+        working-directory: lameda

@@ -1,0 +1,6 @@
+.vercel
+.env*
+
+# Local debug scripts — may touch prod credentials, never commit
+__dbcheck.mjs
+*.local.mjs
