@@ -8,7 +8,7 @@
  * Only ONE payment link is ever generated per order (no reissue).
  * Non-payment after expiry = cancelled.
  *
- * Schedule: every 15 minutes via cron-job.org (`*/15 * * * *` UTC). See docs/CRON_SETUP.md.
+ * Schedule: every 15 minutes via cron-job.org (UTC). See docs/CRON_SETUP.md for the cron expression.
  * Auth: `Authorization: Bearer <CRON_SECRET>` — fail-closed.
  */
 

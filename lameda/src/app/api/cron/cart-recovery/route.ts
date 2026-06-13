@@ -9,7 +9,7 @@
  * Each message is sent only once (tracked via cart_recovery_1/2_sent_at).
  * Stops if the conversation is completed (order placed).
  *
- * Schedule: every 15 minutes via cron-job.org (`*/15 * * * *` UTC). See docs/CRON_SETUP.md.
+ * Schedule: every 15 minutes via cron-job.org (UTC). See docs/CRON_SETUP.md for the cron expression.
  * (Vercel Hobby can't run sub-daily crons, so scheduling lives on cron-job.org.)
  *
  * Auth: `Authorization: Bearer <CRON_SECRET>` — fail-closed (401 if unset/mismatched).
