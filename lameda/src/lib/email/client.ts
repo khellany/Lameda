@@ -11,4 +11,4 @@ export function getEmailClient(): Resend {
   return _client
 }
 
-export const FROM_ADDRESS = process.env.EMAIL_FROM ?? 'Lameda <hello@lameda.ng>'
+export const FROM_ADDRESS = process.env.EMAIL_FROM ?? 'Lameda <hello@lameda.com.ng>'
