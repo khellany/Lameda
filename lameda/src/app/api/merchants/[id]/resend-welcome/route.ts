@@ -41,6 +41,13 @@ export async function POST(
     )
   }
 
+  if (!merchant.api_key) {
+    return NextResponse.json(
+      { error: 'Merchant has no API key — cannot resend welcome email' },
+      { status: 422 },
+    )
+  }
+
   // Decrypt PII fields
   let email: string
   let ownerName: string
