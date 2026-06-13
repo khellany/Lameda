@@ -14,9 +14,9 @@ function generateTempPassword(): string {
 
 export async function POST(
   _request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const merchantId = params.id
+  const { id: merchantId } = await params
   if (!merchantId) {
     return NextResponse.json({ error: 'Missing merchant id' }, { status: 400 })
   }
