@@ -137,66 +137,81 @@ function HandoffCard({ h, defaultOpen }: { h: HandoffData; defaultOpen: boolean 
 
           {/* Reply form */}
           <div className="px-5 py-4">
-            {replyState.success && replyState.conversationId === h.id ? (
-              <p className="text-sm text-emerald-600 font-medium flex items-center gap-2 py-1">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+            {/* Two sibling forms — never nested. Nested <form> elements are invalid HTML
+               and break React's server-action interceptor. Buttons are linked to their
+               respective form via the HTML `form` attribute (form association). */}
+
+            {/* Reply form */}
+            <form action={replyAction} id={`reply-${h.id}`}>
+              <input type="hidden" name="conversationId" value={h.id} />
+              <textarea
+                name="reply"
+                rows={2}
+                placeholder="Type your reply to the customer…"
+                className="w-full resize-none rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm
+                           text-zinc-800 placeholder-zinc-400 outline-none
+                           focus:border-lm-indigo/50 focus:ring-2 focus:ring-lm-indigo/10
+                           transition-all duration-150 bg-zinc-50"
+              />
+            </form>
+
+            {/* Resolve form (no visible UI — button below is linked via form= attribute) */}
+            <form action={resolveAction} id={`resolve-${h.id}`}>
+              <input type="hidden" name="conversationId" value={h.id} />
+            </form>
+
+            {/* Sent confirmation */}
+            {replyState.success && replyState.conversationId === h.id && (
+              <p className="text-sm text-emerald-600 font-medium flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 shrink-0">
                   <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
                 </svg>
                 Message sent to customer.
               </p>
-            ) : (
-              <form action={replyAction} className="flex flex-col gap-2">
-                <input type="hidden" name="conversationId" value={h.id} />
-                <textarea
-                  name="reply"
-                  rows={2}
-                  placeholder="Type your reply to the customer…"
-                  className="w-full resize-none rounded-xl border border-zinc-200 px-3.5 py-2.5 text-sm
-                             text-zinc-800 placeholder-zinc-400 outline-none
-                             focus:border-lm-indigo/50 focus:ring-2 focus:ring-lm-indigo/10
-                             transition-all duration-150 bg-zinc-50"
-                />
-                {replyState.error && replyState.conversationId === h.id && (
-                  <p className="text-xs text-red-600">{replyState.error}</p>
-                )}
-                <div className="flex items-center justify-between gap-3">
-                  <form action={resolveAction}>
-                    <input type="hidden" name="conversationId" value={h.id} />
-                    <button
-                      type="submit"
-                      className="text-xs text-zinc-400 hover:text-zinc-600 underline underline-offset-2 transition-colors"
-                    >
-                      Mark resolved
-                    </button>
-                  </form>
-                  <button
-                    type="submit"
-                    disabled={replyPending}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold
-                               bg-lm-lime text-lm-indigo hover:brightness-105
-                               disabled:opacity-50 disabled:cursor-not-allowed
-                               transition-all duration-150 active:scale-95"
-                  >
-                    {replyPending ? (
-                      <>
-                        <svg className="animate-spin w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        Sending…
-                      </>
-                    ) : (
-                      <>
-                        Send
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                          <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
-                        </svg>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
             )}
+
+            {/* Error */}
+            {replyState.error && replyState.conversationId === h.id && (
+              <p className="text-xs text-red-600">{replyState.error}</p>
+            )}
+
+            {/* Action row — buttons reference forms by id, no nesting needed */}
+            <div className="flex items-center justify-between gap-3 mt-1">
+              <button
+                type="submit"
+                form={`resolve-${h.id}`}
+                className="text-xs text-zinc-400 hover:text-zinc-700 underline underline-offset-2 transition-colors"
+              >
+                Mark resolved
+              </button>
+
+              <button
+                type="submit"
+                form={`reply-${h.id}`}
+                disabled={replyPending}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold
+                           bg-lm-lime text-lm-indigo hover:brightness-105
+                           disabled:opacity-50 disabled:cursor-not-allowed
+                           transition-all duration-150 active:scale-95"
+              >
+                {replyPending ? (
+                  <>
+                    <svg className="animate-spin w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Sending…
+                  </>
+                ) : (
+                  <>
+                    Send
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                      <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
+                    </svg>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
