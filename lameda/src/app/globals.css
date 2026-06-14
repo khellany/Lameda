@@ -10,6 +10,19 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-poppins: var(--font-poppins);
+  --font-inter: var(--font-inter);
+
+  /* Lameda brand palette */
+  --color-lm-indigo: #1e1b4b;
+  --color-lm-indigo-dark: #12103a;
+  --color-lm-indigo-mid: #2d2a6e;
+  --color-lm-lime: #a3e635;
+  --color-lm-lavender: #a5b4fc;
+  --color-lm-surface: #f8f7ff;
+  --color-lm-border: #e0e7ff;
+  --color-lm-muted: #6b7280;
+  --color-lm-muted-dark: #6b7fc4;
 }
 
 @media (prefers-color-scheme: dark) {

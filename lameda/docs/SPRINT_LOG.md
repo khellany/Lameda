@@ -642,21 +642,21 @@ silently failing to send** (the Telegram client swallows the error).
 **Verification**
 - `tsc --noEmit` → exit 0.
 
-**Pending owner actions (before this is live)**
-1. Apply migration `019_subscription_billing.sql` (Supabase SQL editor or `supabase db push`).
-2. Regenerate types: `supabase gen types typescript --project-id vcimxquovtqsqcwuqmfq | Out-File -FilePath "src/types/database.ts" -Encoding utf8`
-3. Remove the 9 `as any` casts marked `// TODO: remove after migration 019`:
-   - `src/app/api/webhooks/paystack/route.ts` (×8), `src/app/dashboard/billing/page.tsx` (×1).
-   (Must be done before the next production build — `next build` lints and `no-explicit-any` is an error.)
-4. Create Paystack **Plans** (one per tier): run `npm run setup:paystack-plans`
-   (`scripts/create-paystack-plans.mjs` — idempotent; creates/reuses plans via the Paystack API and
-   prints the env lines). Set the printed `PAYSTACK_PLAN_*` + `SUBSCRIPTION_PRICE_*_KOBO` in Vercel env.
-   (Override prices first via `SUBSCRIPTION_PRICE_*_KOBO` in `.env.local` if the ₦5k/15k/40k
-   placeholders aren't right.)
-5. Add the Paystack webhook URL (`/api/webhooks/paystack`) in the Paystack dashboard and enable the
-   `subscription.create`, `invoice.payment_failed`, `subscription.disable` events (charge.success
-   is typically already on).
-6. Set `CRON_SECRET` in Production + redeploy (fixes the cron 401s).
+**Owner actions — ✅ all completed (2026-06-13)**
+1. ✅ Migration `019_subscription_billing.sql` applied.
+2. ✅ Types regenerated.
+3. ✅ All 9 `as any` casts removed (`paystack/route.ts` ×8, `billing/page.tsx` ×1).
+4. ✅ Paystack Plans created + `PAYSTACK_PLAN_*` / `SUBSCRIPTION_PRICE_*_KOBO` set in Vercel.
+5. ✅ Paystack webhook events enabled (`subscription.create`, `invoice.payment_failed`, `subscription.disable`).
+6. ✅ `CRON_SECRET` set.
+
+**Deployment & cron migration (2026-06-13)**
+- Committed Sprints 6–7.5 (`fb15fd0`); first deploy errored on a `*/15` literal in a cron JSDoc
+  header (closed the block comment) — fixed in `a0e5a26`, deploy `dpl_SG1Eds…` **READY** in production.
+- Crons moved off Vercel (`crons` block removed from `vercel.json`) to **cron-job.org** per
+  `docs/CRON_SETUP.md`. Verified live: `/api/cron/{cart-recovery,merchant-digest,bot-health}`
+  return **200** (the earlier `401`s — VULN-003 — are resolved).
+- Subscription billing is **live** (Plans + env + webhook events configured).
 
 **Deferred / tech debt**
 - Dunning / grace period before suspension on failed renewal.
