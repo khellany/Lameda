@@ -65,7 +65,7 @@ export function MarketingPage() {
               <span className="text-[0.84rem] text-lm-muted-dark">WhatsApp coming soon</span>
             </div>
             <div className="flex items-center gap-5 mt-5 flex-wrap">
-              <span className="text-[0.84rem] text-lm-muted-dark">Paystack secured</span>
+              <span className="text-[0.84rem] text-lm-muted-dark">Verified payments</span>
               <span className="text-lm-indigo-mid">&middot;</span>
               <span className="text-[0.84rem] text-lm-muted-dark">NDPR compliant</span>
               <span className="text-lm-indigo-mid">&middot;</span>
@@ -83,8 +83,8 @@ export function MarketingPage() {
             sizes="45vw"
             priority
           />
-          {/* Gradient blends left edge into section colour */}
-          <div className="absolute inset-0 bg-gradient-to-r from-lm-indigo via-lm-indigo/50 to-transparent" />
+          {/* Gradient blends left edge into section colour — kept light so the photo reads through */}
+          <div className="absolute inset-0 bg-gradient-to-r from-lm-indigo/90 via-lm-indigo/20 to-transparent" />
         </div>
       </section>
 
@@ -154,9 +154,9 @@ export function MarketingPage() {
             </h2>
             <div className="flex flex-col gap-8">
               {[
-                { n: '1', title: 'Add your products', body: 'Upload photos, set prices, connect your Paystack account. Takes about 5 minutes.' },
+                { n: '1', title: 'Add your products', body: 'Upload photos, set prices, connect your payment account. Takes about 5 minutes.' },
                 { n: '2', title: 'Share your store link', body: 'You get a unique link. Drop it in your WhatsApp status, Telegram channel, or Instagram bio.' },
-                { n: '3', title: 'Get paid automatically', body: 'Orders come in, payments are verified by Paystack, and you are notified. No manual checking.' },
+                { n: '3', title: 'Get paid automatically', body: 'Orders come in, payments are verified automatically, and you are notified. No manual checking.' },
               ].map((step) => (
                 <div key={step.n} className="flex gap-5 items-start">
                   <div className="w-10 h-10 min-w-[40px] bg-lm-indigo rounded-[10px] flex items-center justify-center font-poppins font-black text-[0.9rem] text-lm-lime">
@@ -241,7 +241,7 @@ export function MarketingPage() {
             <div className="flex flex-col gap-6">
               {[
                 { title: '24/7 automated store', body: 'Your bot takes orders and answers product questions while you sleep, eat, or rest.' },
-                { title: 'Verified payments only', body: 'Paystack confirms every payment before your customer gets a confirmation. No more fake alerts.' },
+                { title: 'Verified payments only', body: 'Every payment is automatically confirmed before your customer gets a receipt. No more fake alerts or bounced transfers.' },
                 { title: 'Product catalogue', body: 'Add photos, prices, and descriptions. Customers browse directly inside WhatsApp or Telegram.' },
                 { title: 'Sales dashboard', body: 'Every order, every payment, every customer in one place. No more counting notebooks.' },
                 { title: 'Customer broadcasts', body: 'Restocked? New promo? Send a message to all opted-in customers at once.' },
@@ -276,7 +276,7 @@ export function MarketingPage() {
               </div>
               <div className="text-[0.84rem] text-gray-400 mb-5 pb-5 border-b border-gray-100">For new stores getting their first orders.</div>
               <ul className="flex flex-col gap-2.5 mb-6 list-none p-0">
-                {['Bot store (Telegram)', 'Unlimited products', 'Paystack payments', 'Order notifications'].map((f) => (
+                {['Bot store (Telegram)', 'Unlimited products', 'Secure payments', 'Order notifications'].map((f) => (
                   <li key={f} className="text-[0.86rem] text-lm-muted flex items-center gap-2">
                     <span className="text-lm-lime font-bold">&#10003;</span>{f}
                   </li>
@@ -337,7 +337,7 @@ export function MarketingPage() {
             </div>
           </div>
           <p className="text-[0.84rem] text-gray-400 mt-6">
-            All plans include a 14-day free trial. Payments processed securely by Paystack.
+            All plans include a 14-day free trial. No card required to start.
           </p>
         </div>
       </section>
@@ -354,7 +354,7 @@ export function MarketingPage() {
             </h2>
             <div className="flex flex-col gap-4">
               {[
-                { title: 'Payments by Paystack', body: 'Every transaction goes through Paystack, a CBN-licensed processor trusted by thousands of Nigerian businesses.' },
+                { title: 'Secure, verified payments', body: 'Every transaction is verified automatically before your customer gets confirmation. No fake alerts, no bounced payments.' },
                 { title: 'NDPR Compliant', body: 'Your customer data is stored and handled in line with the Nigeria Data Protection Regulation.' },
                 { title: 'CAC Registered', body: 'Lameda is a registered Nigerian business. We are not going anywhere.' },
               ].map((card) => (
@@ -416,13 +416,12 @@ export function MarketingPage() {
                 { value: '5 min', label: 'to set up your store' },
                 { value: '24/7', label: 'taking orders while you sleep' },
                 { value: '14 days', label: 'free before you pay anything' },
-                { value: '&#8358;0', label: 'setup cost, ever' },
+                { value: '₦0', label: 'setup cost, ever' },
               ].map((stat) => (
                 <div key={stat.label} className="border-t border-white/15 pt-5">
-                  <div
-                    className="font-poppins text-[2rem] font-black text-lm-lime leading-none mb-2"
-                    dangerouslySetInnerHTML={{ __html: stat.value }}
-                  />
+                  <div className="font-poppins text-[2rem] font-black text-lm-lime leading-none mb-2">
+                    {stat.value}
+                  </div>
                   <div className="text-[0.84rem] text-lm-lavender leading-[1.5]">{stat.label}</div>
                 </div>
               ))}
