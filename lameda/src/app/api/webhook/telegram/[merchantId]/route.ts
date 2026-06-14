@@ -195,25 +195,33 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // Step 6: Load or create conversation with full state
+    // Step 6: Load or create conversation with full state.
+    // Include 'idle' so handoff conversations (status='idle') are resumed correctly
+    // rather than creating a new active conversation that bypasses the handoff.
     const { data: existingConv } = await supabase
       .from('conversations')
-      .select('id, message_count, state, cart')
+      .select('id, message_count, state, cart, status, current_intent')
       .eq('merchant_id', merchant.id)
       .eq('customer_id', customer.id)
-      .eq('status', 'active')
+      .in('status', ['active', 'idle'])
+      .order('last_message_at', { ascending: false })
+      .limit(1)
       .maybeSingle()
 
     let conversationId: string
     let messageCount: number
     let convState: ConversationState
     let convCart: Cart
+    let convStatus: string
+    let convCurrentIntent: string | null
 
     if (existingConv) {
       conversationId = existingConv.id
       messageCount = existingConv.message_count ?? 0
       convState = (existingConv.state as unknown as ConversationState) ?? { phase: 'greeting', channel: 'telegram' }
       convCart = (existingConv.cart as unknown as Cart) ?? { items: [], totalKobo: 0 }
+      convStatus = existingConv.status
+      convCurrentIntent = existingConv.current_intent
     } else {
       const { data: newConv, error: convError } = await supabase
         .from('conversations')
@@ -239,7 +247,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       messageCount = 0
       convState = { phase: 'greeting', channel: 'telegram' }
       convCart = { items: [], totalKobo: 0 }
+      convStatus = 'active'
+      convCurrentIntent = null
     }
+
+    // A handoff is active when the conversation was paused for agent takeover.
+    // While this is true the bot must NOT run the state machine — the agent owns the conversation.
+    const isHandoffActive = convStatus === 'idle' && (convCurrentIntent?.startsWith('handoff:') ?? false)
 
     // Persist inbound message
     await supabase.from('messages').insert({
@@ -262,6 +276,30 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const incomingText = message.text ?? ''
     const isSlashCommand = incomingText.startsWith('/')
     const isAdminSender = merchant.admin_telegram_chat_id === message.from
+
+    // Handoff guard: the agent owns this conversation — bot stays silent for customer messages.
+    // We still persist the message (done above) and acknowledge once so the customer knows
+    // a human is on the way, but we never call runStateMachine while handoff is active.
+    if (!isAdminSender && isHandoffActive) {
+      const alreadyAcked = (convState as unknown as Record<string, unknown>).handoffAcknowledged === true
+      if (!alreadyAcked) {
+        await sendTextMessage(
+          botToken,
+          message.from,
+          `⏳ You're connected with our support team. They'll get back to you shortly — usually within a few minutes. Thanks for your patience! 🙏`,
+        )
+        await supabase
+          .from('conversations')
+          .update({
+            state: { ...(convState as object), handoffAcknowledged: true } as unknown as import('@/types/database').Json,
+            message_count: messageCount + 1,
+            last_message_at: new Date().toISOString(),
+          })
+          .eq('id', conversationId)
+      }
+      await markWebhookProcessed(supabase, webhookEventId)
+      return NextResponse.json({ ok: true })
+    }
 
     // STORY-028: stamp funnel step 4 on the first inbound customer message.
     // Null-guarded so the write fires at most once per merchant; idempotent at DB level.
@@ -312,9 +350,102 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           case '/cancelorder':
             result = await handleCancelOrderByRef(args[0] ?? '', botToken, message.from, merchant.id, convState, convCart)
             break
+          case '/reply': {
+            // /reply <shortcode> <message text>
+            // shortcode = last 8 characters of conversation UUID
+            // Lets the merchant agent reply to a customer from within Telegram itself.
+            const shortcode = args[0] ?? ''
+            const replyBody = args.slice(1).join(' ').trim()
+            if (!shortcode || !replyBody) {
+              await sendTextMessage(botToken, message.from, `Usage: /reply <conv-id> <message>\n\nExample: /reply a3b4c5d6 Your order is on the way!`)
+              result = { newState: convState, newCart: convCart, replySent: 'Reply usage hint sent.' }
+              break
+            }
+            // Find the conversation by shortcode suffix
+            const { data: targetConv } = await supabase
+              .from('conversations')
+              .select('id, customer_id, customers!inner(phone_number)')
+              .eq('merchant_id', merchant.id)
+              .like('id', `%-${shortcode}`)
+              .maybeSingle()
+            if (!targetConv) {
+              // Supabase UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx — last 12 chars before suffix
+              // Fallback: search by last 8 chars of the UUID string without dashes
+              const { data: fallbackConv } = await supabase
+                .from('conversations')
+                .select('id, customer_id, customers!inner(phone_number)')
+                .eq('merchant_id', merchant.id)
+                .in('status', ['active', 'idle'])
+                .order('last_message_at', { ascending: false })
+                .limit(20)
+              const matched = fallbackConv?.find(c => c.id.replace(/-/g, '').endsWith(shortcode))
+              if (!matched) {
+                await sendTextMessage(botToken, message.from, `❌ No conversation found with shortcode "${shortcode}". Check your handoffs dashboard for the correct ID.`)
+                result = { newState: convState, newCart: convCart, replySent: 'Conv not found.' }
+                break
+              }
+              const customerChatId = (matched.customers as unknown as { phone_number: string })?.phone_number
+              if (customerChatId) {
+                await sendTextMessage(botToken, customerChatId, replyBody)
+                await supabase.from('messages').insert({
+                  conversation_id: matched.id, merchant_id: merchant.id, customer_id: matched.customer_id,
+                  direction: 'outbound', content: replyBody, message_type: 'text',
+                  external_message_id: null, metadata: { agent_relay: true, via: 'telegram_reply_cmd' },
+                })
+                await sendTextMessage(botToken, message.from, `✅ Sent to customer.`)
+              }
+              result = { newState: convState, newCart: convCart, replySent: '✅ Relayed.' }
+              break
+            }
+            const customerChatId = (targetConv.customers as unknown as { phone_number: string })?.phone_number
+            if (customerChatId) {
+              await sendTextMessage(botToken, customerChatId, replyBody)
+              await supabase.from('messages').insert({
+                conversation_id: targetConv.id, merchant_id: merchant.id, customer_id: targetConv.customer_id,
+                direction: 'outbound', content: replyBody, message_type: 'text',
+                external_message_id: null, metadata: { agent_relay: true, via: 'telegram_reply_cmd' },
+              })
+              await sendTextMessage(botToken, message.from, `✅ Sent to customer.`)
+            }
+            result = { newState: convState, newCart: convCart, replySent: '✅ Relayed.' }
+            break
+          }
           default:
             result = await handleAdminHelp(botToken, message.from, convState, convCart)
         }
+      } else {
+        // Admin sent plain text (not a slash command, not mid-flow).
+        // If there's exactly one open handoff, relay directly to that customer.
+        const { data: openHandoffs } = await supabase
+          .from('conversations')
+          .select('id, customer_id, customers!inner(phone_number)')
+          .eq('merchant_id', merchant.id)
+          .eq('status', 'idle')
+          .like('current_intent', 'handoff:%')
+          .order('last_message_at', { ascending: false })
+          .limit(10)
+        if (openHandoffs && openHandoffs.length === 1 && incomingText.trim()) {
+          const handoff = openHandoffs[0]
+          const customerChatId = (handoff.customers as unknown as { phone_number: string })?.phone_number
+          if (customerChatId) {
+            await sendTextMessage(botToken, customerChatId, incomingText.trim())
+            await supabase.from('messages').insert({
+              conversation_id: handoff.id, merchant_id: merchant.id, customer_id: handoff.customer_id,
+              direction: 'outbound', content: incomingText.trim(), message_type: 'text',
+              external_message_id: null, metadata: { agent_relay: true, via: 'telegram_plain_text' },
+            })
+            await sendTextMessage(botToken, message.from, `✅ Sent to customer.`)
+            result = { newState: convState, newCart: convCart, replySent: '✅ Relayed.' }
+          }
+        } else if (openHandoffs && openHandoffs.length > 1) {
+          const list = openHandoffs
+            .map(h => `• \`/reply ${h.id.replace(/-/g, '').slice(-8)} ...\``)
+            .join('\n')
+          await sendTextMessage(botToken, message.from,
+            `Multiple open handoffs — use the reply command:\n${list}\n\nExample: /reply a3b4c5d6 Your order is on its way!`)
+          result = { newState: convState, newCart: convCart, replySent: 'Multiple handoffs hint sent.' }
+        }
+        // If no open handoffs: fall through to state machine (normal admin conversation with bot)
       }
     }
 

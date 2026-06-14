@@ -1,51 +1,22 @@
 /**
  * /dashboard/handoffs — STORY-027
  *
- * Shows conversations the AI escalated to human support.
- * Merchants can review and mark them resolved once handled.
+ * Agent inbox: conversations the bot escalated to a human.
+ * Agents can read the thread, reply to the customer (sent via Telegram),
+ * and mark conversations resolved (which re-activates the bot).
  *
- * A conversation is "open handoff" when current_intent starts with 'handoff:'.
- * Resolving clears current_intent and sets status back to 'active' so the bot
- * can resume serving the customer if they message again.
+ * The handoff guard in the Telegram webhook ensures the bot stays silent
+ * while a conversation has status='idle' + current_intent='handoff:*'.
  */
 
 import { redirect } from 'next/navigation'
-import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getDashboardContext } from '@/lib/crm/session'
 import { safeDecrypt } from '@/lib/crypto/pii'
-import { formatDate } from '../_ui'
+import { HandoffsClient } from './HandoffsClient'
+import type { HandoffData } from './HandoffsClient'
 
 export const dynamic = 'force-dynamic'
-
-// ─── Server Action ────────────────────────────────────────────────────────────
-
-async function resolveHandoff(formData: FormData) {
-  'use server'
-  const ctx = await getDashboardContext()
-  if (!ctx?.merchant) return
-
-  const conversationId = formData.get('conversationId')
-  if (typeof conversationId !== 'string' || !conversationId) return
-
-  const db = createAdminClient()
-  // Scoped update: only touches a conversation that belongs to this merchant.
-  await db
-    .from('conversations')
-    .update({ current_intent: null, status: 'active' })
-    .eq('id', conversationId)
-    .eq('merchant_id', ctx.merchant.id)
-
-  revalidatePath('/dashboard/handoffs')
-}
-
-// ─── Reason label ─────────────────────────────────────────────────────────────
-
-function handoffLabel(intent: string): { label: string; urgent: boolean } {
-  if (intent.includes('low_confidence'))
-    return { label: 'Bot unsure — needed human', urgent: false }
-  return { label: 'Customer asked for support', urgent: true }
-}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -53,99 +24,90 @@ export default async function HandoffsPage() {
   const ctx = await getDashboardContext()
   if (!ctx?.merchant) redirect('/login')
   const merchantId = ctx.merchant.id
-
   const db = createAdminClient()
 
+  // Fetch open handoff conversations
   const { data: rows } = await db
     .from('conversations')
-    .select(
-      'id, current_intent, last_message_at, customers!inner ( display_name )',
-    )
+    .select('id, current_intent, last_message_at, customers!inner ( display_name )')
     .eq('merchant_id', merchantId)
     .like('current_intent', 'handoff:%')
     .order('last_message_at', { ascending: false })
-    .limit(100)
+    .limit(50)
 
-  const handoffs = (rows ?? []).map((r) => {
+  const convIds = (rows ?? []).map(r => r.id)
+
+  // Fetch recent messages for those conversations in one query
+  const { data: msgRows } = convIds.length
+    ? await db
+        .from('messages')
+        .select('id, conversation_id, direction, content, created_at')
+        .in('conversation_id', convIds)
+        .order('created_at', { ascending: false })
+        .limit(convIds.length * 8) // up to 8 messages per conversation
+    : { data: [] }
+
+  // Group messages by conversation, keep last 6 in chronological order
+  const msgMap: Record<string, { id: string; direction: 'inbound' | 'outbound'; content: string; createdAt: string }[]> = {}
+  for (const m of msgRows ?? []) {
+    if (!msgMap[m.conversation_id]) msgMap[m.conversation_id] = []
+    if (msgMap[m.conversation_id].length < 6) {
+      msgMap[m.conversation_id].push({
+        id: m.id,
+        direction: m.direction as 'inbound' | 'outbound',
+        content: m.content ?? '',
+        createdAt: m.created_at,
+      })
+    }
+  }
+  // Reverse each group so messages appear oldest-first in the UI
+  for (const id of Object.keys(msgMap)) {
+    msgMap[id] = msgMap[id].reverse()
+  }
+
+  const handoffs: HandoffData[] = (rows ?? []).map(r => {
     const cust = r.customers as unknown as { display_name: string | null } | null
     return {
       id: r.id,
+      shortcode: r.id.replace(/-/g, '').slice(-8),
       customerName: safeDecrypt(cust?.display_name ?? null) || 'Unknown customer',
       intent: r.current_intent ?? '',
       lastMessageAt: r.last_message_at,
+      messages: msgMap[r.id] ?? [],
     }
   })
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-zinc-900">Handoffs</h1>
-        <p className="text-sm text-zinc-500">
-          Conversations the bot escalated to human support.
-          {handoffs.length > 0
-            ? ` ${handoffs.length} open.`
-            : ' None open right now.'}
-        </p>
+      {/* ── Page header ───────────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl font-bold text-lm-indigo">Agent Inbox</h1>
+            {handoffs.length > 0 && (
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full
+                               bg-lm-lime text-lm-indigo text-xs font-black tabular-nums">
+                {handoffs.length}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-sm text-zinc-500">
+            {handoffs.length > 0
+              ? `${handoffs.length} conversation${handoffs.length === 1 ? '' : 's'} waiting for your reply.`
+              : 'All clear — no open handoffs right now.'}
+          </p>
+        </div>
+        {handoffs.length > 0 && (
+          <div className="shrink-0 bg-lm-indigo/5 border border-lm-indigo/10 rounded-xl px-3 py-2 text-[0.75rem] text-lm-indigo/60 leading-snug max-w-[220px]">
+            <p className="font-medium text-lm-indigo/80 mb-0.5">Reply from Telegram too</p>
+            Reply directly in your bot, or use{' '}
+            <code className="font-mono bg-lm-indigo/10 px-1 rounded">/reply &lt;id&gt; message</code>
+          </div>
+        )}
       </div>
 
-      {handoffs.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-zinc-100 px-5 py-12 text-center">
-          <p className="text-2xl">🎉</p>
-          <p className="mt-2 text-sm text-zinc-500">All caught up — no open handoffs.</p>
-        </div>
-      ) : (
-        <div className="bg-white rounded-2xl border border-zinc-100 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-zinc-400 border-b border-zinc-100">
-                  <th className="px-5 py-2.5 font-medium">Customer</th>
-                  <th className="px-5 py-2.5 font-medium">Reason</th>
-                  <th className="px-5 py-2.5 font-medium text-right">Last activity</th>
-                  <th className="px-5 py-2.5 font-medium text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {handoffs.map((h) => {
-                  const { label, urgent } = handoffLabel(h.intent)
-                  return (
-                    <tr key={h.id} className="border-b border-zinc-50 last:border-0">
-                      <td className="px-5 py-3 font-medium text-zinc-900">
-                        {h.customerName}
-                      </td>
-                      <td className="px-5 py-3">
-                        <span
-                          className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border ${
-                            urgent
-                              ? 'bg-red-50 text-red-700 border-red-200'
-                              : 'bg-amber-50 text-amber-700 border-amber-200'
-                          }`}
-                        >
-                          {urgent ? '🚨' : '⚠️'} {label}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-right text-zinc-500">
-                        {formatDate(h.lastMessageAt)}
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <form action={resolveHandoff}>
-                          <input type="hidden" name="conversationId" value={h.id} />
-                          <button
-                            type="submit"
-                            className="text-xs font-medium text-zinc-600 hover:text-zinc-900 underline underline-offset-2 transition-colors"
-                          >
-                            Mark resolved
-                          </button>
-                        </form>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {/* ── Handoff cards ─────────────────────────────────────────────────── */}
+      <HandoffsClient handoffs={handoffs} />
     </div>
   )
 }

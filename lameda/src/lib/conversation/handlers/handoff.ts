@@ -51,11 +51,16 @@ export async function handleHumanHandoff(
         ? 'AI confidence too low'
         : 'Customer requested human support'
 
+    // 8-character shortcode from the UUID hex (no dashes) for use with /reply command
+    const shortcode = ctx.conversationId.replace(/-/g, '').slice(-8)
+
     const adminAlert =
       `🚨 *Customer needs human support*\n\n` +
       `Reason: _${reasonLabel}_\n` +
-      `Store: *${merchant.business_name ?? 'Your store'}*\n\n` +
-      `Reply to this customer in your bot to take over the conversation.`
+      `Store: *${merchant.business_name ?? 'Your store'}*\n` +
+      `Conv ID: \`${shortcode}\`\n\n` +
+      `*To reply:* Just type your message here (if this is your only open handoff), ` +
+      `or use:\n\`/reply ${shortcode} Your message here\``
 
     await sendTextMessage(ctx.botToken, merchant.admin_telegram_chat_id, adminAlert).catch(err => {
       // Non-fatal: log but don't block the customer-facing response
