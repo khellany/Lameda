@@ -1,9 +1,12 @@
 'use server'
 
+import type { Database } from '@/types/database'
 import { createAdminClient, createServerSupabaseClient } from '@/lib/supabase/server'
 import { getDashboardContext } from '@/lib/crm/session'
 import { encryptPii } from '@/lib/crypto/pii'
 import { changePassword } from '../change-password/actions'
+
+type MerchantsUpdate = Database['public']['Tables']['merchants']['Update']
 
 export { changePassword }
 
@@ -24,7 +27,7 @@ export async function updateProfile(
   const personality = formData.get('bot_personality')?.toString().trim() ?? ''
 
   // Admin can also update business name and owner name; sales rep cannot.
-  const updates: Record<string, unknown> = {
+  const updates: MerchantsUpdate = {
     whatsapp_number: whatsapp || null,
     pickup_address:  pickup   || null,
     bot_personality: personality || null,

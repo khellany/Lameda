@@ -2,9 +2,10 @@
 
 import { useActionState } from 'react'
 import { inviteStaff, deactivateStaff } from './actions'
+import type { InviteResult } from './actions'
 import { formatDate } from '../_ui'
 
-const IDLE = { success: false }
+const IDLE: InviteResult = { success: false }
 
 interface Member {
   id: string

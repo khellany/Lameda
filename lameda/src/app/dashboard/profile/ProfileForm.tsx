@@ -2,9 +2,10 @@
 
 import { useActionState } from 'react'
 import { updateProfile, updateStaffProfile, changePassword } from './actions'
+import type { UpdateProfileResult } from './actions'
 import type { DashboardRole } from '@/lib/crm/session'
 
-const IDLE = { success: false }
+const IDLE: UpdateProfileResult = { success: false }
 
 interface AdminProps {
   role: 'admin'

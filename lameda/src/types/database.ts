@@ -421,6 +421,56 @@ export type Database = {
         }
         Relationships: []
       }
+      merchant_staff: {
+        Row: {
+          id: string
+          merchant_id: string
+          auth_user_id: string | null
+          role: string
+          name: string
+          email: string
+          email_hash: string
+          is_active: boolean
+          invited_by: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          merchant_id: string
+          auth_user_id?: string | null
+          role?: string
+          name: string
+          email: string
+          email_hash: string
+          is_active?: boolean
+          invited_by: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          merchant_id?: string
+          auth_user_id?: string | null
+          role?: string
+          name?: string
+          email?: string
+          email_hash?: string
+          is_active?: boolean
+          invited_by?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "merchant_staff_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string
