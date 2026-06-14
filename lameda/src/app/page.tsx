@@ -38,7 +38,7 @@ export default function HomePage() {
                 Sign in
               </Link>
               <Link
-                href="/register"
+                href="/onboard"
                 className="bg-lm-lime text-lm-indigo text-[0.88rem] font-bold px-[18px] py-2 rounded-[6px] no-underline hover:opacity-90 transition-opacity"
               >
                 Start free
@@ -67,7 +67,7 @@ export default function HomePage() {
               </p>
               <div className="flex flex-col gap-2.5 items-start">
                 <Link
-                  href="/register"
+                  href="/onboard"
                   className="inline-flex items-center gap-2 bg-lm-lime text-lm-indigo text-[0.96rem] font-bold px-[26px] py-3.5 rounded-[7px] no-underline hover:opacity-90 transition-opacity font-inter"
                 >
                   Set up my store, it&rsquo;s free &rarr;
@@ -409,7 +409,7 @@ export default function HomePage() {
                 ))}
               </ul>
               <Link
-                href="/register"
+                href="/onboard"
                 className="block text-center bg-lm-indigo text-white text-[0.86rem] font-bold py-2.5 rounded-[7px] no-underline"
               >
                 Start free trial
@@ -445,7 +445,7 @@ export default function HomePage() {
                 ))}
               </ul>
               <Link
-                href="/register"
+                href="/onboard"
                 className="block text-center bg-lm-lime text-lm-indigo text-[0.86rem] font-bold py-2.5 rounded-[7px] no-underline"
               >
                 Start free trial
@@ -477,7 +477,7 @@ export default function HomePage() {
                 ))}
               </ul>
               <Link
-                href="/register"
+                href="/onboard"
                 className="block text-center bg-lm-indigo text-white text-[0.86rem] font-bold py-2.5 rounded-[7px] no-underline"
               >
                 Start free trial
@@ -572,7 +572,7 @@ export default function HomePage() {
             Set up your store in 5 minutes. No code. No developer. Free for 14 days.
           </p>
           <Link
-            href="/register"
+            href="/onboard"
             className="inline-flex items-center gap-2 bg-lm-lime text-lm-indigo text-[0.96rem] font-bold px-[26px] py-3.5 rounded-[7px] no-underline hover:opacity-90 transition-opacity font-inter"
           >
             Launch my free store &rarr;
