@@ -34,4 +34,8 @@ export default withSentryConfig(nextConfig, {
   tunnelRoute: '/monitoring',
   // Disable Sentry logger to reduce bundle size
   disableLogger: true,
+  // Sentry's webpack plugin conflicts with Turbopack middleware output and
+  // prevents middleware.js.nft.json from being written to the expected path.
+  // Disable automatic middleware instrumentation to avoid this.
+  autoInstrumentMiddleware: false,
 })
