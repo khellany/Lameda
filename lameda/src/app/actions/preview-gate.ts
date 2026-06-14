@@ -37,7 +37,7 @@ export async function requestPreviewAccess(
 
   if (whitelisted) {
     const cookieStore = await cookies()
-    cookieStore.set(PREVIEW_COOKIE, generatePreviewToken(), {
+    cookieStore.set(PREVIEW_COOKIE, await generatePreviewToken(), {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',

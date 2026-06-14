@@ -6,7 +6,7 @@ import { ComingSoon } from './_components/ComingSoon'
 export default async function HomePage() {
   const cookieStore = await cookies()
   const token = cookieStore.get(PREVIEW_COOKIE)?.value
-  const hasAccess = token ? verifyPreviewToken(token) : false
+  const hasAccess = token ? await verifyPreviewToken(token) : false
 
   if (hasAccess) return <MarketingPage />
   return <ComingSoon />
