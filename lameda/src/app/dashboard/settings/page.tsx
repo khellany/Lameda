@@ -29,6 +29,7 @@ function healthDot(score: number | null): string {
 export default async function SettingsPage() {
   const ctx = await getDashboardContext()
   if (!ctx?.merchant) redirect('/login')
+  if (ctx.role === 'sales_rep') redirect('/dashboard')
 
   const db = createAdminClient()
 

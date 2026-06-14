@@ -28,6 +28,7 @@ export default async function BillingPage({
   searchParams: Promise<{ status?: string }>
 }) {
   const ctx = await getDashboardContext()
+  if (ctx?.role === 'sales_rep') redirect('/dashboard')
   if (!ctx?.merchant) redirect('/login')
 
   const sp = await searchParams

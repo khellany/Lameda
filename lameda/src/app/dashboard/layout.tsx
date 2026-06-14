@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getDashboardContext } from '@/lib/crm/session'
 import { SignOutButton } from './SignOutButton'
+import { NavBar } from './NavBar'
+import { ForcePasswordModal } from './ForcePasswordModal'
 
 // Session-dependent — never statically optimised.
 export const dynamic = 'force-dynamic'
@@ -43,85 +45,47 @@ export default async function DashboardLayout({
     .eq('merchant_id', m.id)
     .like('current_intent', 'handoff:%')
 
+  const subBadgeStyle: Record<string, string> = {
+    trial:     'bg-amber-100 text-amber-700',
+    active:    'bg-emerald-100 text-emerald-700',
+    suspended: 'bg-red-100 text-red-700',
+    cancelled: 'bg-zinc-100 text-zinc-500',
+  }
+
   return (
     <div className="min-h-screen bg-zinc-50">
-      <header className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto max-w-6xl px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <span className="font-bold text-zinc-900 truncate max-w-[40vw]">
+      {ctx.forcePasswordChange && <ForcePasswordModal />}
+
+      <header className="border-b border-zinc-200 bg-white sticky top-0 z-40">
+        <div className="mx-auto max-w-7xl px-4 h-14 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-6 min-w-0">
+            <Link href="/dashboard" className="font-bold text-zinc-900 truncate max-w-[160px] shrink-0">
               {m.business_name}
-            </span>
-            <nav className="flex items-center gap-1 text-sm">
-              <Link
-                href="/dashboard"
-                className="px-3 py-1.5 rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors"
-              >
-                Overview
-              </Link>
-              <Link
-                href="/dashboard/orders"
-                className="px-3 py-1.5 rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors"
-              >
-                Orders
-              </Link>
-              <Link
-                href="/dashboard/customers"
-                className="px-3 py-1.5 rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors"
-              >
-                Customers
-              </Link>
-              <Link
-                href="/dashboard/analytics"
-                className="px-3 py-1.5 rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors"
-              >
-                Analytics
-              </Link>
-              <Link
-                href="/dashboard/broadcasts"
-                className="px-3 py-1.5 rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors"
-              >
-                Broadcasts
-              </Link>
-              <Link
-                href="/dashboard/referrals"
-                className="px-3 py-1.5 rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors"
-              >
-                Referrals
-              </Link>
-              <Link
-                href="/dashboard/billing"
-                className="px-3 py-1.5 rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors"
-              >
-                Billing
-              </Link>
-              <Link
-                href="/dashboard/settings"
-                className="px-3 py-1.5 rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors"
-              >
-                Settings
-              </Link>
-              <Link
-                href="/dashboard/handoffs"
-                className="px-3 py-1.5 rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors flex items-center gap-1.5"
-              >
-                Handoffs
-                {openHandoffs != null && openHandoffs > 0 && (
-                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-100 text-red-700 text-[10px] font-bold">
-                    {openHandoffs > 99 ? '99+' : openHandoffs}
-                  </span>
-                )}
-              </Link>
-            </nav>
+            </Link>
+            <NavBar role={ctx.role} openHandoffs={openHandoffs ?? 0} />
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs px-2 py-1 rounded-full bg-zinc-100 text-zinc-500 capitalize">
+
+          <div className="flex items-center gap-3 shrink-0">
+            {ctx.role === 'sales_rep' && (
+              <span className="text-xs px-2 py-1 rounded-full bg-blue-50 text-blue-700 font-medium">
+                Sales Rep
+              </span>
+            )}
+            <span className={`text-xs px-2 py-1 rounded-full capitalize font-medium ${subBadgeStyle[m.subscription_status] ?? 'bg-zinc-100 text-zinc-500'}`}>
               {m.subscription_status}
             </span>
+            <Link
+              href="/dashboard/profile"
+              className="text-sm text-zinc-500 hover:text-zinc-900 transition-colors"
+            >
+              Profile
+            </Link>
             <SignOutButton />
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
+
+      <main className="mx-auto max-w-7xl px-4 py-8">{children}</main>
     </div>
   )
 }

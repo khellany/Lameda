@@ -15,6 +15,7 @@ export const dynamic = 'force-dynamic'
 export default async function ReferralsPage() {
   const ctx = await getDashboardContext()
   if (!ctx?.merchant) redirect('/login')
+  if (ctx.role === 'sales_rep') redirect('/dashboard')
 
   const merchantId = ctx.merchant.id
   const db = createAdminClient()

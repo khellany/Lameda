@@ -31,6 +31,7 @@ export async function sendBroadcast(
 ): Promise<BroadcastResult> {
   const ctx = await getDashboardContext()
   if (!ctx?.merchant) redirect('/login')
+  if (ctx.role === 'sales_rep') return { ok: false, error: 'Only admins can send broadcasts.' }
 
   const parsed = BroadcastSchema.safeParse({ segment, message })
   if (!parsed.success) return { ok: false, error: 'Invalid input' }

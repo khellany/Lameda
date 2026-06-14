@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
     user_metadata: {
       full_name: data.owner_name,
       business_name: data.business_name,
+      force_password_change: true,
     },
   })
 
