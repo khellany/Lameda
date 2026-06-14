@@ -48,14 +48,14 @@ export function ComingSoon() {
           </p>
 
           <h1 className="font-poppins text-[2.6rem] lg:text-[3.1rem] font-black text-white leading-[1.08] mb-7">
-            Your store,<br />
-            inside Telegram.<br />
-            <span className="text-lm-lime">Running itself.</span>
+            Orders processed.<br />
+            Leads converted.<br />
+            <span className="text-lm-lime">Your store never sleeps.</span>
           </h1>
 
           <p className="text-[1rem] text-lm-lavender leading-[1.85] mb-10 max-w-[420px]">
-            Lameda turns your product catalogue into a Telegram bot that takes orders,
-            verifies payments, and notifies you around the clock. No staff. No downtime.
+            Lameda gives your business an automated bot that captures leads, processes orders,
+            confirms payments, and notifies you in real time. No staff. No missed sales.
           </p>
 
           {submitted ? (
