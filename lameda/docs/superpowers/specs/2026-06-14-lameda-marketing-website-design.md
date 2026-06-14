@@ -39,15 +39,21 @@ All Nigerian merchants, with solo hustlers and small shop owners (1-5 staff) as 
 
 ## 4. Visual Direction
 
-- **Background:** white / off-white (`#fff` / `#fafafa`)
-- **Primary colour:** deep green `#1a7f4b`
-- **Text:** near-black `#0d1f14`
-- **Accent backgrounds:** light green `#f8fdf9`, `#e8f5e9`
-- **Borders:** `#e5e5e5` (neutral), `#c8e6c9` (trust/positive)
-- **Final CTA section:** dark green `#0d1f14` background with white text (inverted)
-- **Typography:** system font stack is fine for MVP; could add Inter or Plus Jakarta Sans later
-- **No gradients** except the dark CTA section
+- **Primary background:** deep indigo `#1e1b4b`
+- **Surface / card background:** `#2d2a6e` (slightly lighter indigo for cards on dark sections)
+- **Light sections background:** `#f8f7ff` (near-white with a whisper of indigo — for pain, features sections)
+- **Primary accent:** electric lime `#a3e635`
+- **Primary text (on dark):** white `#ffffff`
+- **Secondary text (on dark):** lavender `#a5b4fc`
+- **Primary text (on light):** deep indigo `#1e1b4b`
+- **Secondary text (on light):** `#6b7280`
+- **Accent badge / highlight backgrounds:** `#a3e635` with `#1e1b4b` text
+- **Borders (on light sections):** `#e0e7ff`
+- **Final CTA section:** `#1e1b4b` background (same as hero) — page bookends match
+- **Typography:** Poppins (headings, weights 600/700/800) + Inter (body, weights 400/500/600) — loaded from Google Fonts
+- **No gradients** — flat colour only
 - **Border radius:** 10-12px on cards, 6px on buttons
+- **Nav background:** `#1e1b4b` (matches hero, appears as one unified top block)
 
 ---
 
@@ -61,9 +67,9 @@ Sticky top navigation.
 
 | Element | Detail |
 |---|---|
-| Logo | Green square icon + "Lameda" wordmark |
-| Links | "How it works" (smooth scroll), "Pricing" (smooth scroll), "Sign in" |
-| CTA | "Start free" button, deep green, links to Telegram bot |
+| Logo | Indigo-on-lime square icon + "Lameda" wordmark in white |
+| Links | "How it works" (smooth scroll), "Pricing" (smooth scroll), "Sign in" — text in lavender `#a5b4fc` |
+| CTA | "Start free" button in electric lime `#a3e635` with indigo text — links to `/register` |
 | Mobile | Hamburger collapse on small screens |
 
 ### 5.2 Hero
@@ -74,7 +80,7 @@ Sticky top navigation.
 **Subheadline:**
 > Lameda turns your product catalogue into a shopping experience inside WhatsApp and Telegram — no website, no app, no developer needed.
 
-**Supporting line (green, bold):**
+**Supporting line (electric lime, bold):**
 > They tap. They browse. They pay. You get notified.
 
 **Primary CTA button:**
@@ -228,13 +234,21 @@ Dark green background (`#0d1f14`).
 
 ## 6. Primary CTA Behaviour
 
-All CTA buttons ("Start free trial", "Set up my store", "Launch my free store") deep-link to the Telegram bot onboarding flow. The exact `t.me/...` URL is injected from an environment variable `NEXT_PUBLIC_TELEGRAM_BOT_URL` so it can change without a deploy.
+All CTA buttons ("Start free trial", "Set up my store", "Launch my free store") follow this flow:
+
+```
+CTA click → /register (website signup page) → Telegram bot → complete onboarding
+```
+
+The `/register` page already exists in the codebase (`src/app/(auth)/register` or equivalent). After successful registration, the merchant is directed to launch their Telegram bot to complete the onboarding flow.
+
+The Telegram bot deep-link URL is injected from an environment variable so it can change without a deploy:
 
 ```
 NEXT_PUBLIC_TELEGRAM_BOT_URL=https://t.me/YourBotName
 ```
 
-When WhatsApp support ships, a second env var `NEXT_PUBLIC_WHATSAPP_URL` will be added and the CTA can be updated to show both options.
+When WhatsApp support ships, a second env var `NEXT_PUBLIC_WHATSAPP_URL` will be added and the CTA can be updated to show both channel options.
 
 ---
 
