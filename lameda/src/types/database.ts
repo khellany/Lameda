@@ -307,6 +307,48 @@ export type Database = {
           },
         ]
       }
+      preview_whitelist: {
+        Row: {
+          id: string
+          email: string
+          note: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          email: string
+          note?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          email?: string
+          note?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      waitlist: {
+        Row: {
+          id: string
+          email: string
+          created_at: string
+          notified_at: string | null
+        }
+        Insert: {
+          id?: string
+          email: string
+          created_at?: string
+          notified_at?: string | null
+        }
+        Update: {
+          id?: string
+          email?: string
+          created_at?: string
+          notified_at?: string | null
+        }
+        Relationships: []
+      }
       merchants: {
         Row: {
           admin_telegram_chat_id: string | null
