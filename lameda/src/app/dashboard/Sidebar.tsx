@@ -14,10 +14,10 @@ import {
   CreditCard,
   UsersRound,
   Settings,
+  Package,
+  User,
   ChevronLeft,
   ChevronRight,
-  LogOut,
-  CircleDot,
 } from 'lucide-react'
 import type { DashboardRole } from '@/lib/crm/session'
 import { SignOutButton } from './SignOutButton'
@@ -27,20 +27,21 @@ interface NavItem {
   label: string
   icon: React.ComponentType<{ size?: number; className?: string }>
   adminOnly?: boolean
-  badge?: number
+  isHandoffs?: boolean
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/dashboard',            label: 'Overview',    icon: LayoutDashboard },
-  { href: '/dashboard/orders',     label: 'Orders',      icon: ShoppingBag },
-  { href: '/dashboard/customers',  label: 'Customers',   icon: Users },
-  { href: '/dashboard/analytics',  label: 'Analytics',   icon: BarChart2 },
-  { href: '/dashboard/handoffs',   label: 'Handoffs',    icon: MessageSquareWarning },
-  { href: '/dashboard/broadcasts', label: 'Broadcasts',  icon: Megaphone, adminOnly: true },
-  { href: '/dashboard/referrals',  label: 'Referrals',   icon: Gift,      adminOnly: true },
-  { href: '/dashboard/billing',    label: 'Billing',     icon: CreditCard, adminOnly: true },
-  { href: '/dashboard/team',       label: 'Team',        icon: UsersRound, adminOnly: true },
-  { href: '/dashboard/settings',   label: 'Settings',    icon: Settings,  adminOnly: true },
+  { href: '/dashboard',              label: 'Overview',    icon: LayoutDashboard },
+  { href: '/dashboard/catalogue',    label: 'Catalogue',   icon: Package },
+  { href: '/dashboard/orders',       label: 'Orders',      icon: ShoppingBag },
+  { href: '/dashboard/customers',    label: 'Customers',   icon: Users },
+  { href: '/dashboard/analytics',    label: 'Analytics',   icon: BarChart2 },
+  { href: '/dashboard/handoffs',     label: 'Handoffs',    icon: MessageSquareWarning, isHandoffs: true },
+  { href: '/dashboard/broadcasts',   label: 'Broadcasts',  icon: Megaphone,   adminOnly: true },
+  { href: '/dashboard/referrals',    label: 'Referrals',   icon: Gift,        adminOnly: true },
+  { href: '/dashboard/billing',      label: 'Billing',     icon: CreditCard,  adminOnly: true },
+  { href: '/dashboard/team',         label: 'Team',        icon: UsersRound,  adminOnly: true },
+  { href: '/dashboard/settings',     label: 'Settings',    icon: Settings,    adminOnly: true },
 ]
 
 const SUB_STATUS_STYLES: Record<string, { dot: string; label: string }> = {
@@ -111,7 +112,6 @@ export function Sidebar({ role, openHandoffs, businessName, subscriptionStatus }
         <div className="flex flex-col gap-0.5 px-2">
           {visible.map(item => {
             const active = isActive(item.href)
-            const isHandoffs = item.href === '/dashboard/handoffs'
             const Icon = item.icon
             return (
               <Link
@@ -128,14 +128,11 @@ export function Sidebar({ role, openHandoffs, businessName, subscriptionStatus }
                   ${collapsed ? 'justify-center' : ''}
                 `}
               >
-                <Icon
-                  size={18}
-                  className={`shrink-0 ${active ? 'text-lm-lime' : ''}`}
-                />
+                <Icon size={18} className="shrink-0" />
                 {!collapsed && (
                   <span className="truncate flex-1">{item.label}</span>
                 )}
-                {isHandoffs && openHandoffs > 0 && (
+                {item.isHandoffs && openHandoffs > 0 && (
                   <span className={`
                     inline-flex items-center justify-center min-w-[18px] h-[18px] px-1
                     rounded-full text-[10px] font-bold shrink-0
@@ -145,7 +142,6 @@ export function Sidebar({ role, openHandoffs, businessName, subscriptionStatus }
                     {openHandoffs > 99 ? '99+' : openHandoffs}
                   </span>
                 )}
-                {/* Tooltip in collapsed mode */}
                 {collapsed && (
                   <span className="
                     absolute left-full ml-3 px-2.5 py-1 bg-lm-indigo-dark text-white text-[0.78rem]
@@ -153,7 +149,7 @@ export function Sidebar({ role, openHandoffs, businessName, subscriptionStatus }
                     group-hover:opacity-100 transition-opacity z-50 shadow-lg border border-white/10
                   ">
                     {item.label}
-                    {isHandoffs && openHandoffs > 0 && ` (${openHandoffs})`}
+                    {item.isHandoffs && openHandoffs > 0 && ` (${openHandoffs})`}
                   </span>
                 )}
               </Link>
@@ -164,7 +160,7 @@ export function Sidebar({ role, openHandoffs, businessName, subscriptionStatus }
 
       {/* ── Expand button when collapsed ── */}
       {collapsed && (
-        <div className="px-2 pb-2">
+        <div className="px-2 pb-1">
           <button
             onClick={() => setCollapsed(false)}
             className="w-full flex items-center justify-center p-2.5 rounded-[8px] text-white/40 hover:text-white hover:bg-white/[0.06] transition-colors"
@@ -175,41 +171,39 @@ export function Sidebar({ role, openHandoffs, businessName, subscriptionStatus }
         </div>
       )}
 
-      {/* ── Bottom: merchant info + sign out ── */}
-      <div className={`border-t border-white/[0.07] p-3 ${collapsed ? 'flex flex-col items-center gap-2' : ''}`}>
-        {!collapsed && (
+      {/* ── Bottom: merchant info + profile + sign out ── */}
+      <div className="border-t border-white/[0.07] p-3">
+        {!collapsed ? (
           <>
-            <div className="px-1 mb-2">
+            <div className="px-1 mb-2.5">
               <div className="text-[0.82rem] font-semibold text-white truncate">{businessName}</div>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sub.dot}`} />
-                <span className="text-[0.75rem] text-white/40 capitalize">{sub.label}</span>
+                <span className="text-[0.75rem] text-white/50 capitalize">{sub.label}</span>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               <Link
                 href="/dashboard/profile"
-                className="flex-1 text-center text-[0.78rem] text-white/40 hover:text-white/70 px-2 py-1.5 rounded-[6px] hover:bg-white/[0.05] transition-colors no-underline"
+                className="flex items-center gap-2 flex-1 px-2.5 py-2 rounded-[7px] text-white/60 hover:text-white hover:bg-white/[0.06] transition-colors text-[0.8rem] font-medium no-underline"
               >
+                <User size={15} className="shrink-0" />
                 Profile
               </Link>
               <SignOutButton compact />
             </div>
           </>
-        )}
-        {collapsed && (
-          <>
+        ) : (
+          <div className="flex flex-col items-center gap-2">
             <Link
               href="/dashboard/profile"
               title="Profile"
-              className="p-2 rounded-[8px] text-white/40 hover:text-white/70 hover:bg-white/[0.05] transition-colors"
+              className="p-2.5 rounded-[8px] text-white/60 hover:text-white hover:bg-white/[0.05] transition-colors"
             >
-              <CircleDot size={18} />
+              <User size={18} />
             </Link>
-            <div title={`Sign out (${businessName})`}>
-              <SignOutButton compact iconOnly />
-            </div>
-          </>
+            <SignOutButton iconOnly />
+          </div>
         )}
       </div>
     </aside>

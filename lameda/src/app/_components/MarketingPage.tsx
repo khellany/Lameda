@@ -240,7 +240,7 @@ export function MarketingPage() {
             </p>
             <div className="flex flex-col gap-6">
               {[
-                { title: '24/7 automated store', body: 'Your bot takes orders and answers product questions while you sleep, eat, or rest.' },
+                { title: '24/7 automated store', body: 'Your assistant takes orders and answers product questions while you sleep, eat, or rest.' },
                 { title: 'Verified payments only', body: 'Every payment is automatically confirmed before your customer gets a receipt. No more fake alerts or bounced transfers.' },
                 { title: 'Product catalogue', body: 'Add photos, prices, and descriptions. Customers browse directly inside WhatsApp or Telegram.' },
                 { title: 'Sales dashboard', body: 'Every order, every payment, every customer in one place. No more counting notebooks.' },
@@ -276,7 +276,7 @@ export function MarketingPage() {
               </div>
               <div className="text-[0.84rem] text-gray-400 mb-5 pb-5 border-b border-gray-100">For new stores getting their first orders.</div>
               <ul className="flex flex-col gap-2.5 mb-6 list-none p-0">
-                {['Bot store (Telegram)', 'Unlimited products', 'Secure payments', 'Order notifications'].map((f) => (
+                {['Lameda assistant', 'Unlimited products', 'Secure payments', 'Order notifications'].map((f) => (
                   <li key={f} className="text-[0.86rem] text-lm-muted flex items-center gap-2">
                     <span className="text-lm-lime font-bold">&#10003;</span>{f}
                   </li>
